@@ -1,4 +1,4 @@
-# Gemini Connector — a personal Gemini MCP for Claude
+# Gemini Sidekick — a Gemini MCP connector for Claude
 
 A remote [MCP](https://modelcontextprotocol.io) connector that gives Claude access to your
 Google Gemini models, deployed as a single stateless **Cloudflare Worker** on the free tier.
@@ -85,7 +85,7 @@ After this one-time setup, every push to `main` auto-builds and deploys (**edit 
    https://gemini-mcp.<your-subdomain>.workers.dev
    ```
    `gemini-mcp` is the worker `name` from `wrangler.jsonc`; `<your-subdomain>` is your account's
-   workers.dev subdomain (the same across all your workers). That bare URL should say *"Gemini MCP
+   workers.dev subdomain (the same across all your workers). That bare URL should say *"Gemini Sidekick
    connector is running."* **Your connector URL is it plus `/<CONNECTOR_SECRET>/mcp`:**
    ```
    https://gemini-mcp.<your-subdomain>.workers.dev/<CONNECTOR_SECRET>/mcp
@@ -171,7 +171,7 @@ that's expected, and exactly why the link matters).
 - **"MEDIA assigned to multiple KV Namespace bindings":** there are two `MEDIA` entries — wrangler
   appended one when you accepted its "add it on your behalf" prompt. Keep a single binding.
 - **404 on the connector URL:** the secret in the path doesn't match `CONNECTOR_SECRET`. The bare
-  worker URL (no path) should say "Gemini MCP connector is running."
+  worker URL (no path) should say "Gemini Sidekick connector is running."
 
 ## Configuration (optional)
 
