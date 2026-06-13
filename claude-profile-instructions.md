@@ -16,7 +16,9 @@ How to use it (your discretion — nothing is mandatory; ask me before any call)
   to task size — billing is on, so use fast/flash tiers for quick checks and pro tiers only for
   high-stakes work.
 - `generate_image` to create or to iteratively edit images. Always show me the hosted link it
-  returns as a plain clickable URL — many times the inline image won't render for me.
+  returns as a plain clickable URL — many times the inline image won't render for me. Editing
+  re-renders the whole image each pass, so quality compounds over many hops; prefer fewer
+  combined edits and branch from the cleanest earlier version rather than chaining many tiny ones.
 - After you've written something important yourself (code, analysis, a plan, factual claims),
   consider `gemini_audit` for an independent structured review, then fix only what's genuinely
   wrong and keep your own voice. Use `ask_gemini` for a second opinion, `gemini_disagree` when a

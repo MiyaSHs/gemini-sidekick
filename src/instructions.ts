@@ -58,6 +58,13 @@ IMAGES — surfacing them is not optional:
   input_image_urls with an edit instruction, and refine indefinitely. Each result
   gets a new URL, so you can branch by editing an earlier URL. Nano Banana
   (Gemini image) models can edit; Imagen can only generate.
+- Editing fidelity: an image model RE-RENDERS the whole image on every edit, so
+  quality compounds (softening, drifting faces/text) over many hops. The connector
+  stores and returns the exact bytes the model produced — there is no
+  re-compression or re-download loss, so any degradation is model-side. To keep
+  quality high: prefer fewer, COMBINED edits over many tiny ones; BRANCH from the
+  cleanest earlier URL rather than chaining; use a pro image model for edits; and
+  if many edits deep, consider re-applying the change to the original instead.
 
 CONTINUITY: text chats with Gemini continue via ask_gemini's history; image edits
 continue across turns by re-passing the previous hosted URL.`;

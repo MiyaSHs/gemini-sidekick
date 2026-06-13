@@ -144,7 +144,7 @@ export const TOOLS = [
   {
     name: "generate_image",
     description:
-      "Generate an image, or iteratively EDIT a previous one. To refine a result ('add a red bandana', 'warmer lighting', 'bigger logo'), pass its hosted URL in input_image_urls with the change as the prompt; repeat to keep refining, and pass an earlier URL to branch. Imagen models give best single-shot quality; Nano Banana (Gemini image) models are required for editing. If the user did NOT name a model, offer them a quick choice first (best quality / best for editing / fast & cheap). Every result is also hosted at a link you MUST show the user, because many clients won't render the inline image.",
+      "Generate an image, or iteratively EDIT a previous one. To refine a result ('add a red bandana', 'warmer lighting', 'bigger logo'), pass its hosted URL in input_image_urls with the change as the prompt; repeat to keep refining, and pass an earlier URL to branch. Imagen models give best single-shot quality; Nano Banana (Gemini image) models are required for editing. Editing re-renders the WHOLE image each pass, so quality compounds over many hops (the connector itself stores exact bytes and adds no loss) — prefer fewer combined edits and branch from the cleanest earlier result rather than chaining many tiny ones. If the user did NOT name a model, offer them a quick choice first (best quality / best for editing / fast & cheap). Every result is also hosted at a link you MUST show the user, because many clients won't render the inline image.",
     inputSchema: {
       type: "object",
       properties: {
