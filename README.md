@@ -39,55 +39,67 @@ won't render an inline image from a connector.
 ## Deploy
 
 Prerequisites: a [Cloudflare account](https://dash.cloudflare.com/sign-up) (free) and a
-[Google AI Studio API key](https://aistudio.google.com/apikey) with billing enabled.
+[Google AI Studio API key](https://aistudio.google.com/apikey) with billing enabled. The only
+value you generate yourself is one random string — your connector secret:
 
-> **Using this for yourself? Fork it first.** Cloudflare's Git builds deploy from a repository you
-> control, so click **Fork** on GitHub and run the steps below against *your* fork. You'll create
-> your own KV namespace and put its id in `wrangler.jsonc` — the id committed here belongs to the
-> original author and won't exist in your Cloudflare account.
+```bash
+openssl rand -hex 24
+```
 
-### Option A — Auto-deploy from GitHub (recommended)
+> **Forking this for your own use?** Your `src/` code needs **no** changes. The one fork-specific
+> value is the **KV namespace id**: a KV namespace belongs to a single Cloudflare account, so the
+> id committed here (the original author's) won't work in yours. Set yours — no CLI required:
+>
+> 1. Fork the repo on GitHub.
+> 2. Cloudflare dashboard → **Storage & Databases → KV → Create a namespace** (any name) → copy
+>    its **Namespace ID**.
+> 3. In your fork on GitHub, open `wrangler.jsonc`, replace the `id` on the `MEDIA` binding with
+>    that value, and commit.
+>
+> *(Original author: already set — skip this.)*
 
-Connect the repo to Cloudflare once; every push to `main` then auto-builds and deploys, so the
-workflow becomes **edit → `update.sh` → live**.
+### Option A — Connect the repo to Cloudflare (recommended; no local tooling)
 
-1. **KV namespace.** In your fork, create one and set its id:
-   ```bash
-   npx wrangler kv namespace create MEDIA
-   ```
-   Put the printed `id` into `wrangler.jsonc` → `kv_namespaces[0].id`, replacing the committed
-   value, and commit. ⚠️ If wrangler offers to *"add it on your behalf,"* say **no** — that appends
-   a second `MEDIA` binding and breaks the config. *(Original author: it's already set — skip this.)*
-2. **Connect:** Cloudflare dashboard → *Workers & Pages* → **Create** → **Workers** →
-   **Connect to Git** → authorize GitHub → pick your repo. Build settings: production branch `main`,
-   build command `npm install`, deploy command `npx wrangler deploy`, root directory `/`. Save &
-   deploy. The URL comes from the worker `name` in `wrangler.jsonc` →
-   `https://gemini-mcp.<your-subdomain>.workers.dev` (change `name` first for a different URL).
-3. **Set the two secrets as RUNTIME variables** — the easiest thing to get wrong:
-   - ✅ Open the **worker → Settings → Variables and secrets** and add them *there*.
-   - ❌ Do **not** add them under the **Build** configuration's "Variables and secrets" — those are
-     build-time only; the running worker can't read them, so it deploys but every call fails.
+After this one-time setup, every push to `main` auto-builds and deploys (**edit → `update.sh` → live**).
 
-   Add each as an **encrypted Secret**:
+1. **Create the application.** Dashboard → **Workers & Pages → Create application** →
+   **Import a repository** → **GitHub** → install/authorize the Cloudflare GitHub app → pick your repo.
+2. **On the "Set up your application" screen** (open **Advanced settings** to see everything):
+   - **Build command:** `npm install`
+   - **Deploy command:** `npx wrangler deploy`
+   - **Non-production branch deploy command:** `npx wrangler versions upload` *(the default — leave it)*
+   - **Path:** `/` · **API token:** leave the auto-created one
+   - **Variable name / Variable value → leave BLANK.** ⚠️ This box adds *build* variables; secrets
+     entered here never reach the running worker. The real secrets go in step 3.
+   - Click **Deploy** and let the first build finish.
+3. **Add the two secrets to the WORKER (runtime — not the build).** Open the worker →
+   **Settings → Variables and secrets → + Add**, each as type **Secret** (encrypted):
    - `GEMINI_API_KEY` — your AI Studio key
-   - `CONNECTOR_SECRET` — a long random string (`openssl rand -hex 24`); this is the secret path
-     segment in your URL.
+   - `CONNECTOR_SECRET` — the random string from above (the secret in your URL)
 
-   Then redeploy once (push anything, or *Deployments → Retry*).
+   Save. (`DAILY_CALL_CAP` and `IMAGE_TTL_SECONDS` are already listed as plaintext — they come from
+   `wrangler.jsonc`.) Until the secrets are set, the URL returns a clean *"Server not configured."*
+4. **Get your connector URL.** On the worker's page the address is shown at the top and behind the
+   **Visit** button:
+   ```
+   https://gemini-mcp.<your-subdomain>.workers.dev
+   ```
+   `gemini-mcp` is the worker `name` from `wrangler.jsonc`; `<your-subdomain>` is your account's
+   workers.dev subdomain (the same across all your workers). That bare URL should say *"Gemini MCP
+   connector is running."* **Your connector URL is it plus `/<CONNECTOR_SECRET>/mcp`:**
+   ```
+   https://gemini-mcp.<your-subdomain>.workers.dev/<CONNECTOR_SECRET>/mcp
+   ```
 
-`DAILY_CALL_CAP` and `IMAGE_TTL_SECONDS` deploy automatically from `wrangler.jsonc` as runtime
-plaintext vars — you don't add those by hand. Until the secrets are set, the URL returns a clean
-"Server not configured" message; after that, verify with `npm run smoke`
-(see ["Verify it works"](#verify-it-works-after-deploy)).
-
-To push changes (and trigger an auto-deploy):
+Verify with `npm run smoke` (see ["Verify it works"](#verify-it-works-after-deploy)), then add it in
+claude.ai. Push future changes — which auto-deploy — with:
 
 ```bash
 bash scripts/update.sh "what you changed"     # macOS / Linux / Git Bash
-scripts\update.bat "what you changed"         # Windows cmd / double-click
+scripts\update.bat "what you changed"         # Windows
 ```
 
-### Option B — Manual deploy from your machine
+### Option B — Deploy from your machine with the CLI (alternative)
 
 Needs Node 18+.
 
@@ -95,31 +107,14 @@ Needs Node 18+.
 npm install
 npx wrangler login
 
-# 1) Create your KV namespace; put the printed id into wrangler.jsonc (kv_namespaces[0].id),
-#    replacing the committed value. Say NO if wrangler offers to "add it on your behalf"
-#    (that appends a duplicate MEDIA binding and breaks the config).
+# Forkers: create your KV namespace, then put the printed id in wrangler.jsonc (kv_namespaces[0].id),
+# replacing the committed value. Say NO if wrangler offers to "add it on your behalf".
 npx wrangler kv namespace create MEDIA
 
-# 2) Deploy (creates the worker):
-npx wrangler deploy
-
-# 3) Set the two secrets (the worker now exists). CONNECTOR_SECRET is the path segment in your URL:
-npx wrangler secret put GEMINI_API_KEY      # your AI Studio key
-npx wrangler secret put CONNECTOR_SECRET    # e.g. the output of: openssl rand -hex 24
+npx wrangler deploy                          # creates the worker and prints its URL
+npx wrangler secret put GEMINI_API_KEY       # your AI Studio key
+npx wrangler secret put CONNECTOR_SECRET     # the random string from above
 ```
-
-### Your connector URL (both options)
-
-Cloudflare gives the worker a URL like `https://gemini-mcp.<your-subdomain>.workers.dev`
-(shown in the dashboard, and printed by `wrangler deploy`). **Your connector URL is that plus
-`/<CONNECTOR_SECRET>/mcp`:**
-
-```
-https://gemini-mcp.<your-subdomain>.workers.dev/<CONNECTOR_SECRET>/mcp
-```
-
-Open the bare worker URL in a browser — it should say *"Gemini MCP connector is running"* (it
-never reveals the secret).
 
 ### Connect it to claude.ai (web + mobile + Desktop share this)
 
