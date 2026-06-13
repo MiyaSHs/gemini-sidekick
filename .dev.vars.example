@@ -1,0 +1,9 @@
+# Local development secrets for `wrangler dev`. Copy to `.dev.vars` (gitignored).
+# In production these are set with `wrangler secret put`, NOT from this file.
+
+# Your Google AI Studio API key (billing enabled).
+GEMINI_API_KEY="paste-your-ai-studio-api-key"
+
+# The unguessable secret that forms the first path segment of your connector URL.
+# Generate one with:  openssl rand -hex 24
+CONNECTOR_SECRET="paste-a-long-random-string"

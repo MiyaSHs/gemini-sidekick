@@ -1,0 +1,35 @@
+{
+  // Cloudflare Worker config for the personal Gemini MCP connector.
+  // Docs: https://developers.cloudflare.com/workers/wrangler/configuration/
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "gemini-connector",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-06-01",
+
+  // KV stores generated image/media bytes (served from /img/<id>) and the
+  // optional daily-call counter. Create it once, then paste the id here:
+  //   npx wrangler kv namespace create MEDIA
+  // and re-deploy. See README "One-time setup".
+  "kv_namespaces": [
+    {
+      "binding": "MEDIA",
+      "id": "PASTE_KV_ID_AFTER_RUNNING_WRANGLER_KV_NAMESPACE_CREATE"
+    }
+  ],
+
+  // Non-secret config. Secrets (GEMINI_API_KEY, CONNECTOR_SECRET) are set with
+  // `wrangler secret put` — never put them here.
+  "vars": {
+    // Optional circuit breaker. "0" or "" disables it. e.g. "200" caps billable
+    // Gemini calls per UTC day. This is a guard rail, not your real safety net —
+    // set a Google Cloud budget alert too (see README "Billing safety").
+    "DAILY_CALL_CAP": "0",
+    // How long hosted images live in KV, in seconds. Default 30 days. Images must
+    // outlive an editing session so you can keep refining a result across turns.
+    "IMAGE_TTL_SECONDS": "2592000"
+  },
+
+  "observability": {
+    "enabled": true
+  }
+}
