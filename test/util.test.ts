@@ -7,6 +7,7 @@ import {
   coerceBool,
   coerceNumber,
   coerceStringArray,
+  imageDimensions,
   randomToken,
   sanitizeMethod,
   sanitizeModel,
@@ -53,6 +54,41 @@ test("base64 round-trips exact bytes (no pooled-buffer leakage)", () => {
 test("base64ToBytes handles url-safe alphabet and missing padding", () => {
   // 0xFB 0xFF -> standard "+/8=", url-safe "-_8"
   assert.deepEqual([...base64ToBytes("-_8")], [0xfb, 0xff]);
+});
+
+test("imageDimensions reads PNG, GIF, JPEG, and WebP headers", () => {
+  // PNG 10x20: 8-byte sig, IHDR length+tag, then width/height as big-endian uint32.
+  const png = new Uint8Array([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    0, 0, 0, 0x0d, 0x49, 0x48, 0x44, 0x52,
+    0, 0, 0, 10, 0, 0, 0, 20,
+  ]);
+  assert.deepEqual(imageDimensions(png), { width: 10, height: 20 });
+
+  // GIF89a 3x4: little-endian uint16 width/height at offset 6.
+  const gif = new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 3, 0, 4, 0]);
+  assert.deepEqual(imageDimensions(gif), { width: 3, height: 4 });
+
+  // JPEG 8x6 with an APP0 segment before SOF0 (exercises segment skipping).
+  const jpeg = new Uint8Array([
+    0xff, 0xd8, // SOI
+    0xff, 0xe0, 0x00, 0x10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // APP0, len 16
+    0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x06, 0x00, 0x08, 0x00, 0x00, // SOF0: h=6, w=8
+  ]);
+  assert.deepEqual(imageDimensions(jpeg), { width: 8, height: 6 });
+
+  // WebP VP8X 100x50: 24-bit (canvas-1) width/height, little-endian.
+  const webp = new Uint8Array([
+    0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50, // RIFF....WEBP
+    0x56, 0x50, 0x38, 0x58, 0x0a, 0, 0, 0, 0x00, 0x00, 0x00, 0x00, // VP8X + chunk hdr
+    0x63, 0x00, 0x00, 0x31, 0x00, 0x00, // width-1=99 -> 100, height-1=49 -> 50
+  ]);
+  assert.deepEqual(imageDimensions(webp), { width: 100, height: 50 });
+
+  // Unrecognised or truncated input is a clean null, never a throw.
+  assert.equal(imageDimensions(new Uint8Array([1, 2, 3, 4, 5])), null);
+  assert.equal(imageDimensions(png.subarray(0, 12)), null); // PNG sig but too short
+  assert.equal(imageDimensions(new Uint8Array(0)), null);
 });
 
 test("sanitizeModel strips models/ prefix and rejects injection", () => {

@@ -16,6 +16,7 @@ import {
   coerceBool,
   coerceNumber,
   coerceStringArray,
+  imageDimensions,
   SAFE_INLINE_IMAGE_TYPES,
   sanitizeModel,
   truncate,
@@ -414,7 +415,9 @@ async function hostAndDescribe(ctx: ToolCtx, header: string, medias: Media[]): P
     const bytes = base64ToBytes(m.b64);
     const id = await storeMedia(ctx.env, bytes, m.mimeType);
     const url = mediaUrl(ctx.origin, id);
-    lines.push(`Image ${i} (${m.mimeType}): ${url}`);
+    const dim = imageDimensions(bytes);
+    const desc = dim ? `${m.mimeType}, ${dim.width}×${dim.height}` : m.mimeType;
+    lines.push(`Image ${i} (${desc}): ${url}`);
     lines.push(`  Markdown: ![image ${i}](${url})`);
     lines.push(`  Refine it: generate_image(input_image_urls=["${url}"], prompt="<your change>")`);
     lines.push("");
