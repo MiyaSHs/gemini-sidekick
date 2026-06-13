@@ -129,6 +129,7 @@ const DISAGREE_SCHEMA = {
 export const TOOLS = [
   {
     name: "list_gemini_models",
+    annotations: { title: "List Gemini models", readOnlyHint: true, openWorldHint: true },
     description:
       "List the Gemini models currently on the user's API key, with recommended defaults and per-model capabilities (tier, image generate/edit, grounding, video). ALWAYS call this once before other Gemini tools — the live list is the source of truth. Pick per task and override the defaults with a smaller/cheaper model for smaller jobs.",
     inputSchema: {
@@ -143,6 +144,7 @@ export const TOOLS = [
   },
   {
     name: "generate_image",
+    annotations: { title: "Generate / edit image", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     description:
       "Generate an image, or iteratively EDIT a previous one. To refine a result ('add a red bandana', 'warmer lighting', 'bigger logo'), pass its hosted URL in input_image_urls with the change as the prompt; repeat to keep refining, and pass an earlier URL to branch. Imagen models give best single-shot quality; Nano Banana (Gemini image) models are required for editing. Editing re-renders the WHOLE image each pass, so quality compounds over many hops (the connector itself stores exact bytes and adds no loss) — prefer fewer combined edits and branch from the cleanest earlier result rather than chaining many tiny ones. If the user did NOT name a model, offer them a quick choice first (best quality / best for editing / fast & cheap). Every result is also hosted at a link you MUST show the user, because many clients won't render the inline image.",
     inputSchema: {
@@ -165,7 +167,11 @@ export const TOOLS = [
         },
         aspect_ratio: {
           type: "string",
-          description: "Best-effort aspect ratio for generation, e.g. '1:1', '16:9', '9:16', '4:3', '3:4'.",
+          description: "Best-effort aspect ratio, e.g. '1:1', '16:9', '9:16', '4:3', '3:4', '21:9'.",
+        },
+        image_size: {
+          type: "string",
+          description: "Resolution for Nano Banana (Gemini image) models: '1K', '2K', or '4K'. Best-effort; ignored by Imagen.",
         },
         number_of_images: {
           type: "integer",
@@ -177,6 +183,7 @@ export const TOOLS = [
   },
   {
     name: "gemini_audit",
+    annotations: { title: "Audit with Gemini", readOnlyHint: true, openWorldHint: true },
     description:
       "Get an independent, structured cross-model audit of high-stakes content YOU already produced (code, analysis, a plan, factual claims). Returns issues with severity + location + a concrete suggested correction, plus an overall confidence — so you can surgically fix only what's actually wrong and keep your own voice. Worth running when the work is complex, risky, security-sensitive, or hard to reverse; skip it for routine answers. Prefer a pro/thinking model.",
     inputSchema: {
@@ -195,6 +202,7 @@ export const TOOLS = [
   },
   {
     name: "ask_gemini",
+    annotations: { title: "Ask Gemini (second opinion)", readOnlyHint: true, openWorldHint: true },
     description:
       "Get a genuine second opinion or contrasting perspective from a Gemini model to compare against YOUR OWN answer — which you always write yourself, first and in full. This enriches your answer; it never replaces your reasoning, writing, or creativity. Supports multi-turn via history. Defaults to a fast model; name a pro model for hard questions.",
     inputSchema: {
@@ -208,7 +216,12 @@ export const TOOLS = [
         max_output_tokens: { type: "number", description: "Cap on response length." },
         thinking_budget: {
           type: "number",
-          description: "Thinking-token budget for thinking-capable models (0 disables).",
+          description: "Thinking-token budget for Gemini 2.5-era models (0 disables). For Gemini 3+ use thinking_level instead.",
+        },
+        thinking_level: {
+          type: "string",
+          enum: ["minimal", "low", "medium", "high"],
+          description: "Thinking depth for Gemini 3+ models (replaces thinking_budget there). Higher = deeper reasoning, more cost.",
         },
         json_output: { type: "boolean", description: "Force a valid-JSON response." },
         history: {
@@ -229,6 +242,7 @@ export const TOOLS = [
   },
   {
     name: "gemini_disagree",
+    annotations: { title: "Compare fast vs strong Gemini", readOnlyHint: true, openWorldHint: true },
     description:
       "Ask a fast and a strong Gemini model the same question and surface ONLY where they diverge (conflicting facts, different recommendations or assumptions). Agreement is cheap; divergence is the signal worth showing the user. Costs three calls — use it for genuinely contested or high-stakes questions, not routine ones.",
     inputSchema: {
@@ -244,6 +258,7 @@ export const TOOLS = [
   },
   {
     name: "gemini_digest",
+    annotations: { title: "Digest large input", readOnlyHint: true, openWorldHint: true },
     description:
       "Offload a very large input — a big PDF, an entire codebase dump, a long transcript, or a YouTube URL — to Gemini's huge context window and get back a compact, STRUCTURED summary you then reason over yourself. Use when the input is too large or too costly to read in full. Pass a task/query to focus the digest.",
     inputSchema: {
@@ -254,7 +269,7 @@ export const TOOLS = [
           type: "array",
           items: { type: "string" },
           description:
-            "URLs to digest: PDFs/text/audio/video (fetched and inlined, <15MB each) or YouTube links. Accepts an array, JSON-array string, or single string.",
+            "URLs to digest (up to 10): PDFs/text/audio/video (fetched and inlined, <25MB each) or YouTube links. Accepts an array, JSON-array string, or single string.",
         },
         query: { type: "string", description: "Optional task/question to focus the digest." },
         model: { type: "string", description: "Model id (omit for a long-context default)." },
@@ -264,6 +279,7 @@ export const TOOLS = [
   },
   {
     name: "gemini_grounded",
+    annotations: { title: "Grounded Google Search", readOnlyHint: true, openWorldHint: true },
     description:
       "Run a query through Gemini with Google Search grounding as a second, independent search engine, returning an answer plus its web sources. Use to cross-check YOUR OWN search or factual claims: agreement raises confidence; flag any conflict to the user. Good for recent or verifiable facts.",
     inputSchema: {
@@ -278,8 +294,9 @@ export const TOOLS = [
   },
   {
     name: "gemini_raw",
+    annotations: { title: "Raw Gemini API", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     description:
-      "ESCAPE HATCH: raw, validated passthrough to any model/method on the key for things the other tools don't cover (music/Lyria, video/Veo, robotics, computer-use, TTS, embeddings, future models). Supply model, method (generateContent/predict/predictLongRunning/countTokens/embedContent…), and the exact request body per Google's docs. For long-running jobs (video) pass operation_name to poll. Inline media is auto-hosted and linked; other output file URIs (e.g. Veo video) are surfaced as links on completion. Confirm with the user before expensive jobs like video.",
+      "ESCAPE HATCH: raw, validated passthrough to any model/method on the key for things the other tools don't cover (music/Lyria, video/Veo, robotics, computer-use, TTS, embeddings, future models). Supply model, method (generateContent/predict/predictLongRunning/countTokens/embedContent…), and the exact request body per Google's docs. Long-running jobs are stateless-friendly: predictLongRunning returns immediately with an operation name; then call this tool with operation_name to poll — each call checks for up to ~18s and returns, so re-invoke with the same operation_name until done. Inline media is auto-hosted and linked; other output file URIs (e.g. Veo video) are surfaced as links on completion. Confirm with the user before expensive jobs like video.",
     inputSchema: {
       type: "object",
       properties: {
@@ -326,7 +343,9 @@ function structuredResult(resp: any, note: string): ToolResult {
   const parsed = text ? parseJsonMaybe(text) : undefined;
   if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
     return {
-      content: [textBlock(JSON.stringify(parsed, null, 2)), textBlock(note)],
+      // One text block (note separated by a blank line) — some clients concatenate
+      // adjacent content blocks with no delimiter.
+      content: [textBlock(`${JSON.stringify(parsed, null, 2)}\n\n${note}`)],
       structuredContent: parsed,
     };
   }
@@ -397,7 +416,7 @@ async function hostAndDescribe(ctx: ToolCtx, header: string, medias: Media[]): P
     const url = mediaUrl(ctx.origin, id);
     lines.push(`Image ${i} (${m.mimeType}): ${url}`);
     lines.push(`  Markdown: ![image ${i}](${url})`);
-    lines.push(`  Refine it: generate_image(input_image_urls=["${url}"], prompt="<your change>")`);
+    lines.push(`  Refine it: generate_image(input_image_urls=[\"${url}\"], prompt=\"<your change>\")`);
     lines.push("");
     if (SAFE_INLINE_IMAGE_TYPES[m.mimeType.toLowerCase()]) blocks.push(imageBlock(m.b64, m.mimeType));
   }
@@ -438,9 +457,9 @@ async function loadFilePart(url: string): Promise<any> {
   if (!res.ok) throw new CleanError(`Couldn't fetch ${truncate(u, 120)} (HTTP ${res.status}).`);
   const ct = (res.headers.get("content-type") ?? "").split(";")[0].trim() || "application/octet-stream";
   const buf = new Uint8Array(await res.arrayBuffer());
-  if (buf.byteLength > 15 * 1024 * 1024) {
+  if (buf.byteLength > 25 * 1024 * 1024) {
     throw new CleanError(
-      `${truncate(u, 80)} is ${(buf.byteLength / 1048576).toFixed(1)}MB — over the 15MB inline limit. Split it or paste extracted text into 'content'.`,
+      `${truncate(u, 80)} is ${(buf.byteLength / 1048576).toFixed(1)}MB — over the 25MB inline limit (Worker memory). Split it or paste extracted text into 'content'.`,
     );
   }
   return { inlineData: { mimeType: ct, data: bytesToBase64(buf) } };
@@ -472,15 +491,21 @@ function isImageConfigError(e: unknown): boolean {
  * compatibility), then transparently falls back to IMAGE-only if the model
  * rejects the modality/config combination or returns no image under TEXT+IMAGE.
  */
-async function generateImageContent(ctx: ToolCtx, modelId: string, parts: any[], aspect?: string): Promise<any> {
+async function generateImageContent(ctx: ToolCtx, modelId: string, parts: any[], aspect?: string, imageSize?: string): Promise<any> {
   const base = { contents: [{ role: "user", parts }] };
-  const cfg = (mods: string[], useAspect: boolean) => ({
-    ...base,
-    generationConfig: {
-      responseModalities: mods,
-      ...(useAspect && aspect ? { imageConfig: { aspectRatio: aspect } } : {}),
-    },
-  });
+  const imageConfig = (): Record<string, unknown> | undefined => {
+    const ic: Record<string, unknown> = {};
+    if (aspect) ic.aspectRatio = aspect;
+    if (imageSize) ic.imageSize = imageSize;
+    return Object.keys(ic).length ? ic : undefined;
+  };
+  const cfg = (mods: string[], useImageConfig: boolean) => {
+    const ic = useImageConfig ? imageConfig() : undefined;
+    return {
+      ...base,
+      generationConfig: { responseModalities: mods, ...(ic ? { imageConfig: ic } : {}) },
+    };
+  };
 
   let resp: any;
   try {
@@ -623,11 +648,11 @@ async function generateImage(args: Record<string, unknown>, ctx: ToolCtx): Promi
   const canEdit = meta ? modelCanEditImages(meta) : nameLower.includes("image") && !nameLower.includes("imagen");
 
   if (editing && !canEdit) {
-    const suggestion = defaults.image_edit ? ` Try a Nano Banana model like "${defaults.image_edit}".` : "";
+    const suggestion = defaults.image_edit ? ` Try a Nano Banana model like \"${defaults.image_edit}\".` : "";
     return {
       content: [
         textBlock(
-          `"${modelId}" can't edit images${isImagen ? " (Imagen only generates)" : ""}. Editing needs a Nano Banana (Gemini image) model.${suggestion}`,
+          `\"${modelId}\" can't edit images${isImagen ? " (Imagen only generates)" : ""}. Editing needs a Nano Banana (Gemini image) model.${suggestion}`,
         ),
       ],
       isError: true,
@@ -635,6 +660,7 @@ async function generateImage(args: Record<string, unknown>, ctx: ToolCtx): Promi
   }
 
   const aspect = typeof args.aspect_ratio === "string" && args.aspect_ratio.trim() ? args.aspect_ratio.trim() : undefined;
+  const imageSize = typeof args.image_size === "string" && args.image_size.trim() ? args.image_size.trim() : undefined;
 
   let resp: any;
   if (isImagen && !editing) {
@@ -651,7 +677,7 @@ async function generateImage(args: Record<string, unknown>, ctx: ToolCtx): Promi
       parts.push({ inlineData: { mimeType: img.mimeType, data: img.data } });
     }
     parts.push({ text: prompt });
-    resp = await generateImageContent(ctx, modelId, parts, aspect);
+    resp = await generateImageContent(ctx, modelId, parts, aspect, imageSize);
   }
 
   const medias: Media[] = [];
@@ -661,7 +687,7 @@ async function generateImage(args: Record<string, unknown>, ctx: ToolCtx): Promi
     return {
       content: [
         textBlock(
-          `"${modelId}" returned no image${text ? `. It said: ${truncate(text, 400)}` : " (it may have declined; try rephrasing the prompt)."}`,
+          `\"${modelId}\" returned no image${text ? `. It said: ${truncate(text, 400)}` : " (it may have declined; try rephrasing the prompt)."}`,
         ),
       ],
       isError: true,
@@ -714,10 +740,13 @@ async function askGemini(args: Record<string, unknown>, ctx: ToolCtx): Promise<T
   const topP = coerceNumber(args.top_p);
   const maxOut = coerceNumber(args.max_output_tokens);
   const thinking = coerceNumber(args.thinking_budget);
+  const thinkingLevel = typeof args.thinking_level === "string" && args.thinking_level.trim() ? args.thinking_level.trim() : undefined;
   if (temperature !== undefined) generationConfig.temperature = temperature;
   if (topP !== undefined) generationConfig.topP = topP;
   if (maxOut !== undefined) generationConfig.maxOutputTokens = maxOut;
-  if (thinking !== undefined) generationConfig.thinkingConfig = { thinkingBudget: thinking };
+  // thinking_level (Gemini 3+) takes precedence over the legacy numeric budget (2.5-era).
+  if (thinkingLevel) generationConfig.thinkingConfig = { thinkingLevel };
+  else if (thinking !== undefined) generationConfig.thinkingConfig = { thinkingBudget: thinking };
   if (coerceBool(args.json_output)) generationConfig.responseMimeType = "application/json";
 
   const body: Record<string, unknown> = { contents };
@@ -728,11 +757,12 @@ async function askGemini(args: Record<string, unknown>, ctx: ToolCtx): Promise<T
 
   const resp = await ctx.gemini.generateContent(model, body);
   const text = extractText(resp).trim() || "(Gemini returned no text.)";
-  const blocks: Content[] = [textBlock(text)];
-  if (!coerceBool(args.json_output)) {
-    blocks.push(textBlock(`— Second opinion from ${model}. Compare it against your own answer; keep your own reasoning and voice.`));
-  }
-  return { content: blocks };
+  // Answer + framing in one block, separated by a blank line — some clients
+  // concatenate adjacent content blocks with no delimiter (gluing "Pong— Second…").
+  const out = coerceBool(args.json_output)
+    ? text
+    : `${text}\n\n— Second opinion from ${model}. Compare it against your own answer; keep your own reasoning and voice.`;
+  return { content: [textBlock(out)] };
 }
 
 async function geminiDisagree(args: Record<string, unknown>, ctx: ToolCtx): Promise<ToolResult> {
@@ -781,21 +811,20 @@ async function geminiDisagree(args: Record<string, unknown>, ctx: ToolCtx): Prom
   const analysisText = extractText(analysis).trim();
   const div = parseJsonMaybe(analysisText);
 
-  const blocks: Content[] = [
-    textBlock(`DIVERGENCE ANALYSIS (the signal):\n${div ? JSON.stringify(div, null, 2) : analysisText || "(none)"}`),
-    textBlock(`Raw answer A — ${fast}:\n${truncate(fastAns, 4000)}`),
-    textBlock(`Raw answer B — ${strong}:\n${truncate(strongAns, 4000)}`),
+  const sections: string[] = [
+    `DIVERGENCE ANALYSIS (the signal):\n${div ? JSON.stringify(div, null, 2) : analysisText || "(none)"}`,
+    `Raw answer A — ${fast}:\n${truncate(fastAns, 4000)}`,
+    `Raw answer B — ${strong}:\n${truncate(strongAns, 4000)}`,
   ];
   if (fast === strong) {
-    blocks.push(
-      textBlock(
-        `Note: only one suitable model ("${fast}") was available, so both sides used it — this reflects self-consistency, not cross-model divergence. Pass distinct fast_model/strong_model for a real contrast.`,
-      ),
+    sections.push(
+      `Note: only one suitable model (\"${fast}\") was available, so both sides used it — this reflects self-consistency, not cross-model divergence. Pass distinct fast_model/strong_model for a real contrast.`,
     );
   }
-  blocks.push(textBlock("— Where they diverge is where to dig in and flag to the user. Where they agree, that's cheap confirmation. You still form your own conclusion."));
+  sections.push("— Where they diverge is where to dig in and flag to the user. Where they agree, that's cheap confirmation. You still form your own conclusion.");
 
-  const result: ToolResult = { content: blocks };
+  // One block (sections separated by blank lines) — some clients concatenate adjacent blocks.
+  const result: ToolResult = { content: [textBlock(sections.join("\n\n"))] };
   if (div && typeof div === "object" && !Array.isArray(div)) {
     result.structuredContent = { ...div, fast_model: fast, strong_model: strong, answer_fast: fastAns, answer_strong: strongAns };
   }
@@ -804,7 +833,7 @@ async function geminiDisagree(args: Record<string, unknown>, ctx: ToolCtx): Prom
 
 async function geminiDigest(args: Record<string, unknown>, ctx: ToolCtx): Promise<ToolResult> {
   const content = typeof args.content === "string" ? args.content : "";
-  const fileUrls = coerceStringArray(args.file_urls);
+  const fileUrls = coerceStringArray(args.file_urls).slice(0, 10);
   if (!content.trim() && fileUrls.length === 0) {
     return { content: [textBlock("Provide 'content' (large text) and/or 'file_urls' (PDF/text/media/YouTube) to digest.")], isError: true };
   }
@@ -842,7 +871,8 @@ async function geminiGrounded(args: Record<string, unknown>, ctx: ToolCtx): Prom
 
   const body: Record<string, unknown> = {
     contents: [{ role: "user", parts: [{ text: query }] }],
-    tools: [{ googleSearch: {} }],
+    // Google Search for fresh facts + URL context so Gemini can deep-read the pages it finds.
+    tools: [{ googleSearch: {} }, { urlContext: {} }],
   };
   if (typeof args.system_instruction === "string" && args.system_instruction.trim()) {
     body.systemInstruction = { parts: [{ text: args.system_instruction }] };
@@ -855,11 +885,10 @@ async function geminiGrounded(args: Record<string, unknown>, ctx: ToolCtx): Prom
   const queries: string[] = gm.webSearchQueries ?? [];
 
   const sourceLines = chunks
-    .map((c, i) => {
-      const w = c?.web ?? {};
-      return w.uri ? `[${i + 1}] ${w.title ?? "(untitled)"} — ${w.uri}` : null;
-    })
-    .filter(Boolean) as string[];
+    .map((c) => c?.web ?? {})
+    // Drop non-citation widgets (e.g. Google time/weather "search?q=" cards).
+    .filter((w: any) => w.uri && !/google\.com\/search\?/i.test(w.uri))
+    .map((w: any, i: number) => `[${i + 1}] ${w.title ?? "(untitled)"} — ${w.uri}`);
 
   const out: string[] = [answer, ""];
   if (queries.length) out.push(`Google searched: ${queries.join(" | ")}`);
@@ -882,7 +911,7 @@ async function geminiRaw(args: Record<string, unknown>, ctx: ToolCtx): Promise<T
     }
     if (!resp?.done) {
       return {
-        content: [textBlock(`Operation still running. Call gemini_raw again with operation_name="${name}" to keep polling.\n\n${truncate(JSON.stringify(resp), 1500)}`)],
+        content: [textBlock(`Operation still running. Call gemini_raw again with operation_name=\"${name}\" to keep polling.\n\n${truncate(JSON.stringify(resp), 1500)}`)],
       };
     }
     const medias: Media[] = [];
@@ -918,7 +947,7 @@ async function geminiRaw(args: Record<string, unknown>, ctx: ToolCtx): Promise<T
     return {
       content: [
         textBlock(
-          `Long-running job started. Poll it with gemini_raw operation_name="${resp.name}" (repeat until done). Confirm with the user before waiting on expensive jobs like video.`,
+          `Long-running job started. Poll it with gemini_raw operation_name=\"${resp.name}\" (repeat until done). Confirm with the user before waiting on expensive jobs like video.`,
         ),
       ],
     };
