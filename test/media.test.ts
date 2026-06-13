@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { processMedia } from "../src/tools.ts";
+import { collectUris, processMedia } from "../src/tools.ts";
 
 test("processMedia extracts Nano Banana inlineData and redacts the blob", () => {
   const resp = {
@@ -43,4 +43,15 @@ test("processMedia leaves media-free payloads untouched", () => {
   const redacted = processMedia(resp, out);
   assert.equal(out.length, 0);
   assert.deepEqual(redacted, resp);
+});
+
+test("collectUris finds Veo-style output file URIs", () => {
+  const resp = {
+    response: { generateVideoResponse: { generatedSamples: [{ video: { uri: "https://example.com/v.mp4?key=x" } }] } },
+    extra: { fileUri: "https://example.com/f.bin" },
+  };
+  const out = new Set<string>();
+  collectUris(resp, out);
+  assert.ok(out.has("https://example.com/v.mp4?key=x"));
+  assert.ok(out.has("https://example.com/f.bin"));
 });

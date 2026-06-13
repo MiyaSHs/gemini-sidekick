@@ -107,6 +107,30 @@ test("gemini_audit returns structuredContent (+ text mirror) through the protoco
   assert.match(j.result.content[0].text, /verdict/); // text mirror for older clients
 });
 
+test("ask_gemini preserves the 'model' role in history (multi-turn continuity)", async () => {
+  let captured: any;
+  const stub: any = {
+    env: {},
+    origin: "https://example.workers.dev",
+    gemini: {
+      generateContent: async (_model: string, body: any) => {
+        captured = body;
+        return { candidates: [{ content: { parts: [{ text: "ok" }] } }] };
+      },
+    },
+  };
+  await postWith(
+    rpc("tools/call", {
+      name: "ask_gemini",
+      arguments: { prompt: "next", model: "gemini-x-flash", history: [{ role: "user", text: "hi" }, { role: "model", text: "hello" }] },
+    }),
+    stub,
+  );
+  assert.equal(captured.contents[0].role, "user");
+  assert.equal(captured.contents[1].role, "model"); // not flipped to "user"
+  assert.equal(captured.contents[2].role, "user");
+});
+
 test("malformed JSON body returns a parse error", async () => {
   const req = new Request("https://example.workers.dev/secret/mcp", {
     method: "POST",

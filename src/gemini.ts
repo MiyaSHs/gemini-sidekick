@@ -65,13 +65,6 @@ export class GeminiClient {
     return models;
   }
 
-  /** Resolve a model id to its live metadata (bare id match), or undefined. */
-  async findModel(id: string): Promise<GeminiModel | undefined> {
-    const bare = id.replace(/^models\//, "");
-    const models = await this.listModels();
-    return models.find((m) => m.name.replace(/^models\//, "") === bare);
-  }
-
   /** generateContent (text, multimodal, Nano Banana image models, grounding, TTS…). */
   async generateContent(model: string, body: unknown): Promise<any> {
     await this.countBillableCall();

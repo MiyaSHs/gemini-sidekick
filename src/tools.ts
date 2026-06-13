@@ -217,7 +217,7 @@ export const TOOLS = [
           items: {
             type: "object",
             properties: {
-              role: { type: "string", enum: ["user", "assistant"] },
+              role: { type: "string", enum: ["user", "assistant", "model"] },
               text: { type: "string" },
             },
             required: ["role", "text"],
@@ -279,7 +279,7 @@ export const TOOLS = [
   {
     name: "gemini_raw",
     description:
-      "ESCAPE HATCH: raw, validated passthrough to any model/method on the key for things the other tools don't cover (music/Lyria, video/Veo, robotics, computer-use, TTS, embeddings, future models). Supply model, method (generateContent/predict/predictLongRunning/countTokens/embedContent…), and the exact request body per Google's docs. For long-running jobs (video) pass operation_name to poll. Inline media in the response is auto-hosted and linked. Confirm with the user before expensive jobs like video.",
+      "ESCAPE HATCH: raw, validated passthrough to any model/method on the key for things the other tools don't cover (music/Lyria, video/Veo, robotics, computer-use, TTS, embeddings, future models). Supply model, method (generateContent/predict/predictLongRunning/countTokens/embedContent…), and the exact request body per Google's docs. For long-running jobs (video) pass operation_name to poll. Inline media is auto-hosted and linked; other output file URIs (e.g. Veo video) are surfaced as links on completion. Confirm with the user before expensive jobs like video.",
     inputSchema: {
       type: "object",
       properties: {
@@ -364,6 +364,24 @@ export function processMedia(node: any, out: Media[]): any {
     return copy;
   }
   return node;
+}
+
+/** Collect output file/download URIs (e.g. Veo video, which returns a URI rather
+ *  than inline bytes) so they can be surfaced as clickable links. Exported for tests. */
+export function collectUris(node: any, out: Set<string>): void {
+  if (Array.isArray(node)) {
+    for (const n of node) collectUris(n, out);
+    return;
+  }
+  if (node && typeof node === "object") {
+    for (const [k, v] of Object.entries(node)) {
+      if (typeof v === "string" && /^https?:\/\//i.test(v) && /^(uri|fileUri|file_uri|downloadUri|videoUri)$/i.test(k)) {
+        out.add(v);
+      } else {
+        collectUris(v, out);
+      }
+    }
+  }
 }
 
 /** Host collected media in KV and build content blocks (inline image when the
@@ -683,7 +701,9 @@ async function askGemini(args: Record<string, unknown>, ctx: ToolCtx): Promise<T
   if (Array.isArray(args.history)) {
     for (const turn of args.history as any[]) {
       if (turn && typeof turn.text === "string") {
-        contents.push({ role: turn.role === "assistant" ? "model" : "user", parts: [{ text: turn.text }] });
+        // Accept both "assistant" (our schema) and Gemini's native "model" role.
+        const role = turn.role === "assistant" || turn.role === "model" ? "model" : "user";
+        contents.push({ role, parts: [{ text: turn.text }] });
       }
     }
   }
@@ -869,6 +889,15 @@ async function geminiRaw(args: Record<string, unknown>, ctx: ToolCtx): Promise<T
     const redacted = processMedia(resp, medias);
     const blocks: Content[] = [];
     if (medias.length) blocks.push(...(await hostAndDescribe(ctx, "Operation complete. Media output:", medias)));
+    const uris = new Set<string>();
+    collectUris(redacted, uris);
+    if (uris.size) {
+      blocks.push(
+        textBlock(
+          `Output file URL(s) (e.g. Veo video — may require your API key to download):\n${[...uris].join("\n")}`,
+        ),
+      );
+    }
     blocks.push(textBlock(`Operation complete.\n\n${truncate(JSON.stringify(redacted, null, 2), 6000)}`));
     return { content: blocks };
   }
