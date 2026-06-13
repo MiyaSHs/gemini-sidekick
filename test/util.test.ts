@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  assertPublicHttpUrl,
   base64ToBytes,
   bytesToBase64,
   coerceBool,
@@ -87,4 +88,21 @@ test("randomToken is url-safe and unguessable-length", () => {
   assert.match(t, /^[A-Za-z0-9_-]+$/);
   assert.ok(t.length >= 20);
   assert.notEqual(randomToken(), randomToken());
+});
+
+test("assertPublicHttpUrl allows public http(s) and blocks SSRF targets", () => {
+  assert.equal(assertPublicHttpUrl("https://example.com/a.png").hostname, "example.com");
+  assert.equal(assertPublicHttpUrl("http://1.2.3.4/x").hostname, "1.2.3.4");
+  // non-http(s)
+  assert.throws(() => assertPublicHttpUrl("file:///etc/passwd"), /http/);
+  assert.throws(() => assertPublicHttpUrl("ftp://example.com"), /http/);
+  // loopback / private / link-local / metadata
+  assert.throws(() => assertPublicHttpUrl("http://localhost/x"), /internal/);
+  assert.throws(() => assertPublicHttpUrl("http://127.0.0.1/x"), /private|loopback/);
+  assert.throws(() => assertPublicHttpUrl("http://10.0.0.5/x"), /private|loopback/);
+  assert.throws(() => assertPublicHttpUrl("http://192.168.1.1/x"), /private|loopback/);
+  assert.throws(() => assertPublicHttpUrl("http://172.16.0.1/x"), /private|loopback/);
+  assert.throws(() => assertPublicHttpUrl("http://169.254.169.254/latest/meta-data"), /private|loopback/);
+  assert.throws(() => assertPublicHttpUrl("http://[::1]/x"), /IPv6|private|loopback/);
+  assert.throws(() => assertPublicHttpUrl("not a url"), /valid URL/);
 });

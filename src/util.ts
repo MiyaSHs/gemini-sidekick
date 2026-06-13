@@ -140,6 +140,52 @@ export function sanitizeOperationName(name: unknown): string {
   return name.trim();
 }
 
+/**
+ * Best-effort SSRF guard for server-side fetches of user-supplied URLs.
+ * Allows only http(s) and rejects loopback / private / link-local literals.
+ * Note: this does not resolve DNS, so it can't stop a public hostname that
+ * points at a private IP — Cloudflare's runtime blocks most internal targets,
+ * and this is a personal, secret-gated tool, so this is defence-in-depth.
+ */
+export function assertPublicHttpUrl(raw: string): URL {
+  let u: URL;
+  try {
+    u = new URL(raw.trim());
+  } catch {
+    throw new CleanError(`Not a valid URL: "${truncate(raw, 80)}".`);
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") {
+    throw new CleanError(`Only http(s) URLs are allowed; got "${u.protocol}".`);
+  }
+  const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, ""); // strip IPv6 brackets
+  if (
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host.endsWith(".internal") ||
+    host.endsWith(".local")
+  ) {
+    throw new CleanError("Refusing to fetch an internal host.");
+  }
+  const v4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (v4) {
+    const a = Number(v4[1]);
+    const b = Number(v4[2]);
+    if (
+      a === 0 || a === 127 || a === 10 ||
+      (a === 169 && b === 254) || // link-local
+      (a === 172 && b >= 16 && b <= 31) || // private
+      (a === 192 && b === 168) || // private
+      a >= 224 // multicast / reserved
+    ) {
+      throw new CleanError("Refusing to fetch a private, loopback, or link-local address.");
+    }
+  }
+  if (host === "::" || host === "::1" || host.startsWith("fe80") || host.startsWith("fc") || host.startsWith("fd")) {
+    throw new CleanError("Refusing to fetch a private or loopback IPv6 address.");
+  }
+  return u;
+}
+
 /** Decode standard or URL-safe base64 into a fresh, exact-length byte array. */
 export function base64ToBytes(b64: string): Uint8Array {
   // Normalise URL-safe alphabet and restore padding so atob never chokes.

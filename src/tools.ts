@@ -9,6 +9,7 @@ import {
 import { getMedia, mediaUrl, storeMedia } from "./images.ts";
 import { AUDIT_SYSTEM } from "./instructions.ts";
 import {
+  assertPublicHttpUrl,
   base64ToBytes,
   bytesToBase64,
   CleanError,
@@ -30,6 +31,9 @@ type Content = Record<string, unknown>;
 export interface ToolResult {
   content: Content[];
   isError?: boolean;
+  // MCP 2025-06-18 structured tool output. Returned alongside a text mirror so
+  // older clients still work; lets Claude consume the result as a real object.
+  structuredContent?: Record<string, unknown>;
 }
 
 const textBlock = (text: string): Content => ({ type: "text", text });
@@ -38,6 +42,85 @@ const imageBlock = (data: string, mimeType: string): Content => ({
   data,
   mimeType,
 });
+
+// ---------------------------------------------------------------------------
+// Output schemas. Each is used twice: as the Gemini `responseSchema` (to force
+// structured generation) and as the MCP tool `outputSchema` (so the result's
+// structuredContent is described to the client). `propertyOrdering` is a Gemini
+// extension that plain JSON-Schema consumers harmlessly ignore.
+// ---------------------------------------------------------------------------
+
+const AUDIT_SCHEMA = {
+  type: "object",
+  properties: {
+    verdict: { type: "string", enum: ["sound", "minor_issues", "significant_issues", "incorrect"] },
+    confidence: { type: "number", description: "0..1 confidence in this audit." },
+    summary: { type: "string" },
+    issues: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          severity: { type: "string", enum: ["critical", "high", "medium", "low", "nit"] },
+          location: { type: "string", description: "Where in the content, e.g. a line, function, or quote." },
+          description: { type: "string" },
+          suggested_correction: { type: "string" },
+        },
+        required: ["severity", "description"],
+        propertyOrdering: ["severity", "location", "description", "suggested_correction"],
+      },
+    },
+  },
+  required: ["verdict", "confidence", "summary", "issues"],
+  propertyOrdering: ["verdict", "confidence", "summary", "issues"],
+};
+
+const DIGEST_SCHEMA = {
+  type: "object",
+  properties: {
+    summary: { type: "string" },
+    key_points: { type: "array", items: { type: "string" } },
+    sections: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { title: { type: "string" }, gist: { type: "string" } },
+        required: ["gist"],
+        propertyOrdering: ["title", "gist"],
+      },
+    },
+    entities: { type: "array", items: { type: "string" } },
+    facts_and_figures: { type: "array", items: { type: "string" } },
+    answer_to_task: { type: "string", description: "Only if a task/query was given." },
+    caveats: { type: "array", items: { type: "string" } },
+  },
+  required: ["summary", "key_points"],
+  propertyOrdering: ["summary", "key_points", "sections", "entities", "facts_and_figures", "answer_to_task", "caveats"],
+};
+
+const DISAGREE_SCHEMA = {
+  type: "object",
+  properties: {
+    overall: { type: "string", enum: ["agree", "mostly_agree", "partial", "conflict"] },
+    agreements: { type: "string", description: "One line on what they agree about." },
+    divergences: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          topic: { type: "string" },
+          fast_position: { type: "string" },
+          strong_position: { type: "string" },
+          why_it_matters: { type: "string" },
+        },
+        required: ["topic", "fast_position", "strong_position"],
+        propertyOrdering: ["topic", "fast_position", "strong_position", "why_it_matters"],
+      },
+    },
+  },
+  required: ["overall", "divergences"],
+  propertyOrdering: ["overall", "agreements", "divergences"],
+};
 
 // ---------------------------------------------------------------------------
 // Tool definitions (name, description with trigger conditions, input schema).
@@ -108,6 +191,7 @@ export const TOOLS = [
       },
       required: ["content"],
     },
+    outputSchema: AUDIT_SCHEMA,
   },
   {
     name: "ask_gemini",
@@ -176,6 +260,7 @@ export const TOOLS = [
         model: { type: "string", description: "Model id (omit for a long-context default)." },
       },
     },
+    outputSchema: DIGEST_SCHEMA,
   },
   {
     name: "gemini_grounded",
@@ -212,7 +297,7 @@ export const TOOLS = [
       },
     },
   },
-] as const;
+];
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -226,14 +311,32 @@ function extractText(resp: any): string {
     .join("");
 }
 
-function asStructuredText(resp: any): string {
-  const text = extractText(resp).trim();
-  if (!text) return "(empty response)";
+function parseJsonMaybe(text: string): any {
   try {
-    return JSON.stringify(JSON.parse(text), null, 2);
+    return JSON.parse(text);
   } catch {
-    return text;
+    return undefined;
   }
+}
+
+/** Build a structured tool result: a text mirror (for older clients) plus
+ *  structuredContent (for clients that consume MCP structured output). */
+function structuredResult(resp: any, note: string): ToolResult {
+  const text = extractText(resp).trim();
+  const parsed = text ? parseJsonMaybe(text) : undefined;
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    return {
+      content: [textBlock(JSON.stringify(parsed, null, 2)), textBlock(note)],
+      structuredContent: parsed,
+    };
+  }
+  // responseSchema makes this near-impossible; surface it honestly if it happens.
+  return {
+    content: [
+      textBlock(text ? `Gemini did not return parseable structured output:\n\n${truncate(text, 3000)}` : "(empty response)"),
+    ],
+    isError: true,
+  };
 }
 
 interface Media {
@@ -243,8 +346,8 @@ interface Media {
 
 /** Walk a Gemini response, collecting inline media and returning a redacted copy
  *  (base64 blobs replaced by short placeholders) so we never dump megabytes of
- *  base64 back to the model. */
-function processMedia(node: any, out: Media[]): any {
+ *  base64 back to the model. Exported for tests. */
+export function processMedia(node: any, out: Media[]): any {
   if (Array.isArray(node)) return node.map((n) => processMedia(n, out));
   if (node && typeof node === "object") {
     const inline = node.inlineData ?? node.inline_data;
@@ -286,7 +389,7 @@ async function hostAndDescribe(ctx: ToolCtx, header: string, medias: Media[]): P
   return [...blocks, textBlock(lines.join("\n"))];
 }
 
-/** Load an image to edit: from our own KV (fast path) or any http(s) URL. */
+/** Load an image to edit: from our own KV (fast path) or any public http(s) URL. */
 async function loadImageForEdit(ctx: ToolCtx, rawUrl: string): Promise<{ mimeType: string; data: string }> {
   const url = rawUrl.trim();
   const prefix = `${ctx.origin}/img/`;
@@ -296,10 +399,8 @@ async function loadImageForEdit(ctx: ToolCtx, rawUrl: string): Promise<{ mimeTyp
     if (item) return { mimeType: item.mimeType, data: bytesToBase64(item.bytes) };
     // fall through to a normal fetch if the id wasn't found locally
   }
-  if (!/^https?:\/\//i.test(url)) {
-    throw new CleanError(`input_image_urls must be http(s) URLs; got "${truncate(url, 80)}".`);
-  }
-  const res = await fetch(url);
+  const u = assertPublicHttpUrl(url);
+  const res = await fetch(u);
   if (!res.ok) throw new CleanError(`Couldn't fetch the image to edit (HTTP ${res.status}): ${truncate(url, 120)}`);
   const ct = (res.headers.get("content-type") ?? "").split(";")[0].trim() || "image/png";
   if (!ct.startsWith("image/")) throw new CleanError(`That URL is ${ct}, not an image: ${truncate(url, 80)}`);
@@ -314,8 +415,8 @@ const isYouTube = (u: string) => /(?:youtube\.com|youtu\.be)/i.test(u);
 async function loadFilePart(url: string): Promise<any> {
   const u = url.trim();
   if (isYouTube(u)) return { fileData: { fileUri: u } };
-  if (!/^https?:\/\//i.test(u)) throw new CleanError(`file_urls must be http(s) URLs; got "${truncate(u, 80)}".`);
-  const res = await fetch(u);
+  const parsed = assertPublicHttpUrl(u);
+  const res = await fetch(parsed);
   if (!res.ok) throw new CleanError(`Couldn't fetch ${truncate(u, 120)} (HTTP ${res.status}).`);
   const ct = (res.headers.get("content-type") ?? "").split(";")[0].trim() || "application/octet-stream";
   const buf = new Uint8Array(await res.arrayBuffer());
@@ -330,6 +431,62 @@ async function loadFilePart(url: string): Promise<any> {
 function requireString(v: unknown, field: string): string {
   if (typeof v !== "string" || !v.trim()) throw new CleanError(`'${field}' is required.`);
   return v;
+}
+
+/** A sanitized explicit model, or undefined if none was provided. */
+function explicitModel(v: unknown): string | undefined {
+  return typeof v === "string" && v.trim() ? sanitizeModel(v) : undefined;
+}
+
+/** Compute recommended defaults (lists models — only call when a default is needed). */
+async function defaultsFor(ctx: ToolCtx) {
+  return computeDefaults(await ctx.gemini.listModels());
+}
+
+// Image models disagree on responseModalities/imageConfig; detect that class of error.
+function isImageConfigError(e: unknown): boolean {
+  const msg = e instanceof CleanError ? e.userMessage : e instanceof Error ? e.message : String(e);
+  return /modalit|response_?modalities|image_?config|aspect|generation_?config/i.test(msg);
+}
+
+/**
+ * Generate/edit via generateContent (Nano Banana). Tries TEXT+IMAGE (broadest
+ * compatibility), then transparently falls back to IMAGE-only if the model
+ * rejects the modality/config combination or returns no image under TEXT+IMAGE.
+ */
+async function generateImageContent(ctx: ToolCtx, modelId: string, parts: any[], aspect?: string): Promise<any> {
+  const base = { contents: [{ role: "user", parts }] };
+  const cfg = (mods: string[], useAspect: boolean) => ({
+    ...base,
+    generationConfig: {
+      responseModalities: mods,
+      ...(useAspect && aspect ? { imageConfig: { aspectRatio: aspect } } : {}),
+    },
+  });
+
+  let resp: any;
+  try {
+    resp = await ctx.gemini.generateContent(modelId, cfg(["TEXT", "IMAGE"], true));
+  } catch (e) {
+    if (!isImageConfigError(e)) throw e;
+    return ctx.gemini.generateContent(modelId, cfg(["IMAGE"], false));
+  }
+
+  // Primary call succeeded but produced no image — some models only emit images
+  // under an IMAGE-only modality. Try once more before giving up.
+  const probe: Media[] = [];
+  processMedia(resp, probe);
+  if (probe.length === 0) {
+    try {
+      const alt = await ctx.gemini.generateContent(modelId, cfg(["IMAGE"], false));
+      const probe2: Media[] = [];
+      processMedia(alt, probe2);
+      if (probe2.length > 0) return alt;
+    } catch {
+      // keep the original response so the caller can report what the model said
+    }
+  }
+  return resp;
 }
 
 // ---------------------------------------------------------------------------
@@ -419,12 +576,14 @@ async function generateImage(args: Record<string, unknown>, ctx: ToolCtx): Promi
   const inputs = coerceStringArray(args.input_image_urls).slice(0, 4);
   const editing = inputs.length > 0;
 
+  // generate_image always needs the live list to determine a model's API shape.
   const models = await ctx.gemini.listModels();
   const defaults = computeDefaults(models);
 
   let modelId: string;
-  if (typeof args.model === "string" && args.model.trim()) {
-    modelId = sanitizeModel(args.model);
+  const explicit = explicitModel(args.model);
+  if (explicit) {
+    modelId = explicit;
   } else {
     const fallback = editing ? defaults.image_edit : defaults.image_generate;
     if (!fallback) {
@@ -466,19 +625,15 @@ async function generateImage(args: Record<string, unknown>, ctx: ToolCtx): Promi
     if (aspect) parameters.aspectRatio = aspect;
     resp = await ctx.gemini.predict(modelId, { instances: [{ prompt }], parameters });
   } else {
-    // Nano Banana (Gemini image) via generateContent — supports editing.
+    // Nano Banana (Gemini image) via generateContent — supports editing, with a
+    // transparent TEXT+IMAGE -> IMAGE-only fallback for model-shape differences.
     const parts: any[] = [];
     for (const url of inputs) {
       const img = await loadImageForEdit(ctx, url);
       parts.push({ inlineData: { mimeType: img.mimeType, data: img.data } });
     }
     parts.push({ text: prompt });
-    const generationConfig: Record<string, unknown> = { responseModalities: ["TEXT", "IMAGE"] };
-    if (aspect) generationConfig.imageConfig = { aspectRatio: aspect };
-    resp = await ctx.gemini.generateContent(modelId, {
-      contents: [{ role: "user", parts }],
-      generationConfig,
-    });
+    resp = await generateImageContent(ctx, modelId, parts, aspect);
   }
 
   const medias: Media[] = [];
@@ -504,53 +659,24 @@ async function generateImage(args: Record<string, unknown>, ctx: ToolCtx): Promi
 async function geminiAudit(args: Record<string, unknown>, ctx: ToolCtx): Promise<ToolResult> {
   const content = requireString(args.content, "content");
   const focus = typeof args.focus === "string" && args.focus.trim() ? args.focus.trim() : "";
-  const defaults = computeDefaults(await ctx.gemini.listModels());
-  const model = typeof args.model === "string" && args.model.trim() ? sanitizeModel(args.model) : defaults.reasoning;
+  const model = explicitModel(args.model) ?? (await defaultsFor(ctx)).reasoning;
   if (!model) return { content: [textBlock("No reasoning model is available on your key. Run list_gemini_models.")], isError: true };
-
-  const schema = {
-    type: "object",
-    properties: {
-      verdict: { type: "string", enum: ["sound", "minor_issues", "significant_issues", "incorrect"] },
-      confidence: { type: "number", description: "0..1 confidence in this audit." },
-      summary: { type: "string" },
-      issues: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            severity: { type: "string", enum: ["critical", "high", "medium", "low", "nit"] },
-            location: { type: "string", description: "Where in the content, e.g. a line, function, or quote." },
-            description: { type: "string" },
-            suggested_correction: { type: "string" },
-          },
-          required: ["severity", "description"],
-          propertyOrdering: ["severity", "location", "description", "suggested_correction"],
-        },
-      },
-    },
-    required: ["verdict", "confidence", "summary", "issues"],
-    propertyOrdering: ["verdict", "confidence", "summary", "issues"],
-  };
 
   const resp = await ctx.gemini.generateContent(model, {
     systemInstruction: { parts: [{ text: AUDIT_SYSTEM + (focus ? ` Focus especially on: ${focus}.` : "") }] },
     contents: [{ role: "user", parts: [{ text: `Audit the following content.\n\n=== CONTENT START ===\n${content}\n=== CONTENT END ===` }] }],
-    generationConfig: { temperature: 0.2, responseMimeType: "application/json", responseSchema: schema },
+    generationConfig: { temperature: 0.2, responseMimeType: "application/json", responseSchema: AUDIT_SCHEMA },
   });
 
-  return {
-    content: [
-      textBlock(asStructuredText(resp)),
-      textBlock(`— Independent audit by ${model}. Address the real findings surgically and keep your own voice; an empty issues list means it found nothing.`),
-    ],
-  };
+  return structuredResult(
+    resp,
+    `— Independent audit by ${model}. Address the real findings surgically and keep your own voice; an empty issues list means it found nothing.`,
+  );
 }
 
 async function askGemini(args: Record<string, unknown>, ctx: ToolCtx): Promise<ToolResult> {
   const prompt = requireString(args.prompt, "prompt");
-  const defaults = computeDefaults(await ctx.gemini.listModels());
-  const model = typeof args.model === "string" && args.model.trim() ? sanitizeModel(args.model) : defaults.fast;
+  const model = explicitModel(args.model) ?? (await defaultsFor(ctx)).fast;
   if (!model) return { content: [textBlock("No text model is available on your key. Run list_gemini_models.")], isError: true };
 
   const contents: any[] = [];
@@ -591,9 +717,13 @@ async function askGemini(args: Record<string, unknown>, ctx: ToolCtx): Promise<T
 
 async function geminiDisagree(args: Record<string, unknown>, ctx: ToolCtx): Promise<ToolResult> {
   const prompt = requireString(args.prompt, "prompt");
-  const defaults = computeDefaults(await ctx.gemini.listModels());
-  const fast = typeof args.fast_model === "string" && args.fast_model.trim() ? sanitizeModel(args.fast_model) : defaults.fast;
-  const strong = typeof args.strong_model === "string" && args.strong_model.trim() ? sanitizeModel(args.strong_model) : defaults.reasoning;
+  let fast = explicitModel(args.fast_model);
+  let strong = explicitModel(args.strong_model);
+  if (!fast || !strong) {
+    const d = await defaultsFor(ctx);
+    fast ??= d.fast;
+    strong ??= d.reasoning;
+  }
   if (!fast || !strong) return { content: [textBlock("Need both a fast and a strong model on your key. Run list_gemini_models.")], isError: true };
 
   const sys = typeof args.system_instruction === "string" && args.system_instruction.trim() ? args.system_instruction : undefined;
@@ -606,30 +736,6 @@ async function geminiDisagree(args: Record<string, unknown>, ctx: ToolCtx): Prom
   const [fastResp, strongResp] = await Promise.all([ask(fast), ask(strong)]);
   const fastAns = extractText(fastResp).trim() || "(no answer)";
   const strongAns = extractText(strongResp).trim() || "(no answer)";
-
-  const schema = {
-    type: "object",
-    properties: {
-      overall: { type: "string", enum: ["agree", "mostly_agree", "partial", "conflict"] },
-      agreements: { type: "string", description: "One line on what they agree about." },
-      divergences: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            topic: { type: "string" },
-            fast_position: { type: "string" },
-            strong_position: { type: "string" },
-            why_it_matters: { type: "string" },
-          },
-          required: ["topic", "fast_position", "strong_position"],
-          propertyOrdering: ["topic", "fast_position", "strong_position", "why_it_matters"],
-        },
-      },
-    },
-    required: ["overall", "divergences"],
-    propertyOrdering: ["overall", "agreements", "divergences"],
-  };
 
   const analysis = await ctx.gemini.generateContent(strong, {
     systemInstruction: {
@@ -649,17 +755,31 @@ async function geminiDisagree(args: Record<string, unknown>, ctx: ToolCtx): Prom
         ],
       },
     ],
-    generationConfig: { temperature: 0.2, responseMimeType: "application/json", responseSchema: schema },
+    generationConfig: { temperature: 0.2, responseMimeType: "application/json", responseSchema: DISAGREE_SCHEMA },
   });
 
-  return {
-    content: [
-      textBlock(`DIVERGENCE ANALYSIS (the signal):\n${asStructuredText(analysis)}`),
-      textBlock(`Raw answer A — ${fast}:\n${truncate(fastAns, 4000)}`),
-      textBlock(`Raw answer B — ${strong}:\n${truncate(strongAns, 4000)}`),
-      textBlock("— Where they diverge is where to dig in and flag to the user. Where they agree, that's cheap confirmation. You still form your own conclusion."),
-    ],
-  };
+  const analysisText = extractText(analysis).trim();
+  const div = parseJsonMaybe(analysisText);
+
+  const blocks: Content[] = [
+    textBlock(`DIVERGENCE ANALYSIS (the signal):\n${div ? JSON.stringify(div, null, 2) : analysisText || "(none)"}`),
+    textBlock(`Raw answer A — ${fast}:\n${truncate(fastAns, 4000)}`),
+    textBlock(`Raw answer B — ${strong}:\n${truncate(strongAns, 4000)}`),
+  ];
+  if (fast === strong) {
+    blocks.push(
+      textBlock(
+        `Note: only one suitable model ("${fast}") was available, so both sides used it — this reflects self-consistency, not cross-model divergence. Pass distinct fast_model/strong_model for a real contrast.`,
+      ),
+    );
+  }
+  blocks.push(textBlock("— Where they diverge is where to dig in and flag to the user. Where they agree, that's cheap confirmation. You still form your own conclusion."));
+
+  const result: ToolResult = { content: blocks };
+  if (div && typeof div === "object" && !Array.isArray(div)) {
+    result.structuredContent = { ...div, fast_model: fast, strong_model: strong, answer_fast: fastAns, answer_strong: strongAns };
+  }
+  return result;
 }
 
 async function geminiDigest(args: Record<string, unknown>, ctx: ToolCtx): Promise<ToolResult> {
@@ -669,37 +789,13 @@ async function geminiDigest(args: Record<string, unknown>, ctx: ToolCtx): Promis
     return { content: [textBlock("Provide 'content' (large text) and/or 'file_urls' (PDF/text/media/YouTube) to digest.")], isError: true };
   }
   const query = typeof args.query === "string" && args.query.trim() ? args.query.trim() : "";
-  const defaults = computeDefaults(await ctx.gemini.listModels());
-  const model = typeof args.model === "string" && args.model.trim() ? sanitizeModel(args.model) : defaults.digest;
+  const model = explicitModel(args.model) ?? (await defaultsFor(ctx)).digest;
   if (!model) return { content: [textBlock("No long-context model is available on your key. Run list_gemini_models.")], isError: true };
 
   const parts: any[] = [];
   parts.push({ text: query ? `Task to keep in focus while digesting: ${query}` : "Digest the following input(s)." });
   if (content.trim()) parts.push({ text: content });
   for (const url of fileUrls) parts.push(await loadFilePart(url));
-
-  const schema = {
-    type: "object",
-    properties: {
-      summary: { type: "string" },
-      key_points: { type: "array", items: { type: "string" } },
-      sections: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: { title: { type: "string" }, gist: { type: "string" } },
-          required: ["gist"],
-          propertyOrdering: ["title", "gist"],
-        },
-      },
-      entities: { type: "array", items: { type: "string" } },
-      facts_and_figures: { type: "array", items: { type: "string" } },
-      answer_to_task: { type: "string", description: "Only if a task/query was given." },
-      caveats: { type: "array", items: { type: "string" } },
-    },
-    required: ["summary", "key_points"],
-    propertyOrdering: ["summary", "key_points", "sections", "entities", "facts_and_figures", "answer_to_task", "caveats"],
-  };
 
   const resp = await ctx.gemini.generateContent(model, {
     systemInstruction: {
@@ -710,21 +806,18 @@ async function geminiDigest(args: Record<string, unknown>, ctx: ToolCtx): Promis
       ],
     },
     contents: [{ role: "user", parts }],
-    generationConfig: { temperature: 0.2, maxOutputTokens: 8192, responseMimeType: "application/json", responseSchema: schema },
+    generationConfig: { temperature: 0.2, maxOutputTokens: 8192, responseMimeType: "application/json", responseSchema: DIGEST_SCHEMA },
   });
 
-  return {
-    content: [
-      textBlock(asStructuredText(resp)),
-      textBlock(`— Structured digest by ${model} over ${fileUrls.length + (content.trim() ? 1 : 0)} input(s). Reason over this yourself; it's a compression of the source, not the final answer.`),
-    ],
-  };
+  return structuredResult(
+    resp,
+    `— Structured digest by ${model} over ${fileUrls.length + (content.trim() ? 1 : 0)} input(s). Reason over this yourself; it's a compression of the source, not the final answer.`,
+  );
 }
 
 async function geminiGrounded(args: Record<string, unknown>, ctx: ToolCtx): Promise<ToolResult> {
   const query = requireString(args.query, "query");
-  const defaults = computeDefaults(await ctx.gemini.listModels());
-  const model = typeof args.model === "string" && args.model.trim() ? sanitizeModel(args.model) : defaults.grounding;
+  const model = explicitModel(args.model) ?? (await defaultsFor(ctx)).grounding;
   if (!model) return { content: [textBlock("No grounding-capable model is available on your key. Run list_gemini_models.")], isError: true };
 
   const body: Record<string, unknown> = {
@@ -806,6 +899,7 @@ async function geminiRaw(args: Record<string, unknown>, ctx: ToolCtx): Promise<T
   const redacted = processMedia(resp, medias);
   const blocks: Content[] = [];
   if (medias.length) blocks.push(...(await hostAndDescribe(ctx, `Media output from ${method} on ${model}:`, medias)));
-  blocks.push(textBlock(truncate(JSON.stringify(redacted, null, 2), 8000)));
+  // No media: this may be a large non-media payload (e.g. embeddings); keep more of it.
+  blocks.push(textBlock(truncate(JSON.stringify(redacted, null, 2), medias.length ? 8000 : 60000)));
   return { content: blocks };
 }

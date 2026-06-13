@@ -106,6 +106,10 @@ Set in `wrangler.jsonc` under `vars`, then redeploy:
 - **`IMAGE_TTL_SECONDS`** — how long hosted images live in KV (default `2592000` = 30 days).
   Images must outlive an editing session so you can keep refining a result across turns.
 
+> Free-tier KV allows ~1,000 writes/day. Each generated/edited image is one write (and,
+> if `DAILY_CALL_CAP` is on, each billable call is one more). That's plenty for personal use,
+> but it's the limit you'd hit first if something loops.
+
 ## Billing safety — read this
 
 Billing is on, so a runaway loop costs **money**, not just quota. The `DAILY_CALL_CAP` above is
