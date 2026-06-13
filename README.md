@@ -36,32 +36,64 @@ won't render an inline image from a connector.
 
 ---
 
-## One-time setup
+## Deploy
 
-You need a [Cloudflare account](https://dash.cloudflare.com/sign-up) (free), Node 18+, and a
-[Google AI Studio API key](https://aistudio.google.com/apikey) with billing enabled.
+You need a [Cloudflare account](https://dash.cloudflare.com/sign-up) (free) and a
+[Google AI Studio API key](https://aistudio.google.com/apikey) with billing enabled. The KV
+namespace is already wired into `wrangler.jsonc`, so it isn't part of setup.
+
+### Option A — Auto-deploy from GitHub (recommended)
+
+Connect this repo to Cloudflare once; then every push to `main` auto-builds and deploys, so your
+workflow becomes **edit → `update.sh` → live**. In the Cloudflare dashboard:
+
+1. **Delete the old worker** (if you have one): *Workers & Pages* → open it → *Settings* → *Delete*.
+2. **Connect the repo:** *Workers & Pages* → **Create** → **Workers** → **Connect to Git** →
+   authorize GitHub → pick `MiyaSHs/GEMINI-MCP`.
+3. **Build settings:** production branch `main`; build command `npm install`; deploy command
+   `npx wrangler deploy`; root directory `/`. Save & deploy. The URL comes from the worker `name`
+   in `wrangler.jsonc` → `https://gemini-connector.<your-subdomain>.workers.dev` (change `name`
+   first if you want a different URL).
+4. **Set the two secrets once** (they persist across every future deploy): the worker → *Settings*
+   → *Variables and Secrets* → add as **encrypted Secret**:
+   - `GEMINI_API_KEY` — your AI Studio key
+   - `CONNECTOR_SECRET` — a long random string (`openssl rand -hex 24`); this is the secret path
+     segment in your URL.
+
+   Then trigger one more deploy (push anything, or *Deployments → Retry*).
+
+Until the secrets are set, the URL returns a clean "Server not configured" message rather than
+erroring. After that, verify with `npm run smoke` (see ["Verify it works"](#verify-it-works-after-deploy)).
+
+To push changes (and trigger an auto-deploy), run from the repo:
 
 ```bash
-# 1. Install dependencies
-npm install
+bash scripts/update.sh "what you changed"     # macOS / Linux / Git Bash
+scripts\update.bat "what you changed"         # Windows cmd / double-click
+```
 
-# 2. Log in to Cloudflare (opens a browser)
+### Option B — Manual deploy from your machine
+
+Needs Node 18+. KV is already configured (its id is committed), so you don't create it unless
+you're on a fresh Cloudflare account.
+
+```bash
+npm install
 npx wrangler login
 
-# 3. Pick an unguessable connector secret and keep it handy
-#    (this becomes the first path segment of your connector URL)
-openssl rand -hex 24            # e.g. 7f3c...  -> copy it
+# Pick an unguessable connector secret (the first path segment of your URL):
+openssl rand -hex 24
 
-# 4. Create the KV namespace that hosts generated images, and paste the printed
-#    id into wrangler.jsonc under kv_namespaces[0].id
-npx wrangler kv namespace create MEDIA
-
-# 5. Store the two secrets (you'll be prompted to paste each value)
+# Store the two secrets (you'll be prompted to paste each value):
 npx wrangler secret put GEMINI_API_KEY      # your AI Studio key
-npx wrangler secret put CONNECTOR_SECRET    # the random string from step 3
+npx wrangler secret put CONNECTOR_SECRET    # the random string above
 
-# 6. Deploy (do this AFTER pasting the KV id from step 4)
 npx wrangler deploy
+
+# Fresh Cloudflare account only: create KV and REPLACE the id in wrangler.jsonc by hand.
+# Do NOT accept wrangler's "add it on your behalf" prompt — it appends a duplicate
+# MEDIA binding and breaks the config.
+#   npx wrangler kv namespace create MEDIA
 ```
 
 Wrangler prints your Worker URL, e.g. `https://gemini-connector.<your-subdomain>.workers.dev`.

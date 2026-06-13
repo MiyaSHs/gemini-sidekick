@@ -6,14 +6,16 @@
   "main": "src/index.ts",
   "compatibility_date": "2025-06-01",
 
-  // KV stores generated image/media bytes (served from /img/<id>) and the
-  // optional daily-call counter. Create it once, then paste the id here:
-  //   npx wrangler kv namespace create MEDIA
-  // and re-deploy. See README "One-time setup".
+  // KV namespace for hosted image/media bytes (served from /img/<id>) and the
+  // optional daily-call counter. The id is committed so Git-based auto-deploy
+  // (Cloudflare Workers Builds) works without any interactive prompt. If you ever
+  // recreate the namespace, REPLACE this id by hand — do NOT accept wrangler's
+  // "add it on your behalf" prompt, which appends a second MEDIA binding and
+  // breaks the config (that's the error you hit during manual setup).
   "kv_namespaces": [
     {
       "binding": "MEDIA",
-      "id": "PASTE_KV_ID_AFTER_RUNNING_WRANGLER_KV_NAMESPACE_CREATE"
+      "id": "b3f7047a87ff41579e9ce8c151759c19"
     }
   ],
 
