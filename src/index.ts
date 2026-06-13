@@ -36,7 +36,7 @@ export default {
 
     // Health / landing — never reveals the secret.
     if (path === "/" || path === "/health") {
-      return text("Gemini MCP connector is running. POST JSON-RPC to /<connector-secret>/mcp", 200);
+      return text("Gemini Sidekick connector is running. POST JSON-RPC to /<connector-secret>/mcp", 200);
     }
 
     // Image hosting. The id itself is the unguessable capability, so this route

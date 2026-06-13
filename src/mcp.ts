@@ -24,7 +24,7 @@ function initializeResult(params: any) {
   return {
     protocolVersion,
     capabilities: { tools: { listChanged: false } },
-    serverInfo: { name: "gemini-mcp", title: "Gemini MCP", version: "1.0.0" },
+    serverInfo: { name: "gemini-mcp", title: "Gemini Sidekick", version: "1.0.0" },
     instructions: SERVER_INSTRUCTIONS,
   };
 }
@@ -89,7 +89,7 @@ export async function handleMcpPost(request: Request, ctx: ToolCtx): Promise<Res
     responses.push(await dispatch(msg.method, msg.params, msg.id, ctx));
   }
 
-  // Body contained only notifications → acknowledge with 202 and no content.
+  // Body contained only notifications — acknowledge with 202 and no content.
   if (responses.length === 0) return new Response(null, { status: 202 });
 
   const payload = Array.isArray(body) ? responses : responses[0];

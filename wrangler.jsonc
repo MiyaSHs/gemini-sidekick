@@ -1,5 +1,5 @@
 {
-  // Cloudflare Worker config for the personal Gemini MCP connector.
+  // Cloudflare Worker config for Gemini Sidekick — a Gemini MCP connector for Claude.
   // Docs: https://developers.cloudflare.com/workers/wrangler/configuration/
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "gemini-mcp",
