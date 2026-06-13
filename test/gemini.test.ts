@@ -14,6 +14,7 @@ const MODELS: GeminiModel[] = [
   m("gemini-3.5-flash", ["generateContent", "countTokens"]),
   m("gemini-3.5-flash-lite", ["generateContent"]),
   m("gemini-2.5-pro", ["generateContent"]),
+  m("deep-research-pro-preview-12-2025", ["generateContent"]), // specialist; must NOT become a text default
   m("imagen-4.0-ultra-generate-001", ["predict"]),
   m("imagen-4.0-fast-generate-001", ["predict"]),
   m("gemini-3-pro-image", ["generateContent"]),
@@ -31,8 +32,10 @@ test("computeDefaults picks sensible, task-matched models from the live list", (
   assert.equal(d.video, "veo-3.1-generate-preview"); // long-running
   // fast tier must prefer plain flash over flash-lite
   assert.equal(d.fast, "gemini-3.5-flash");
-  // reasoning prefers the newest pro text model, even when it's a -preview
+  // reasoning prefers the newest pro text model, even when it's a -preview...
   assert.equal(d.reasoning, "gemini-3.1-pro-preview");
+  // ...but never a Deep Research specialist (slow/expensive), despite its high version number.
+  assert.notEqual(d.reasoning, "deep-research-pro-preview-12-2025");
 });
 
 test("computeDefaults degrades cleanly when a family is absent", () => {

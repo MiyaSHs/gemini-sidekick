@@ -218,7 +218,8 @@ const isImageEditModel = (m: GeminiModel) =>
   has(m, "generateContent") && nameHas(m, "image"); // Nano Banana family
 const isTextModel = (m: GeminiModel) =>
   has(m, "generateContent") && !nameHas(m, "image") && !nameHas(m, "tts") &&
-  !nameHas(m, "embedding") && !nameHas(m, "veo") && !nameHas(m, "aqa");
+  !nameHas(m, "embedding") && !nameHas(m, "veo") && !nameHas(m, "aqa") &&
+  !nameHas(m, "research"); // Deep Research models are slow/expensive specialists, never a default
 
 export function computeDefaults(models: GeminiModel[]): ModelDefaults {
   return {
