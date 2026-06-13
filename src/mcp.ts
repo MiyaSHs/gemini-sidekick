@@ -2,8 +2,8 @@ import { SERVER_INSTRUCTIONS } from "./instructions.ts";
 import { callTool, TOOLS, type ToolCtx } from "./tools.ts";
 import { CleanError, truncate } from "./util.ts";
 
-const SUPPORTED_PROTOCOLS = ["2024-11-05", "2025-03-26", "2025-06-18"];
-const LATEST_PROTOCOL = "2025-06-18";
+const SUPPORTED_PROTOCOLS = ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"];
+const LATEST_PROTOCOL = "2025-11-25";
 
 type Id = string | number | null | undefined;
 
