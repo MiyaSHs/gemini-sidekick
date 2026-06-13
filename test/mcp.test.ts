@@ -33,7 +33,7 @@ test("initialize returns serverInfo, capabilities, and the philosophy instructio
   const res = await post(rpc("initialize", { protocolVersion: "2025-06-18" }));
   assert.equal(res.status, 200);
   const j: any = await res.json();
-  assert.equal(j.result.serverInfo.name, "gemini-connector");
+  assert.equal(j.result.serverInfo.name, "gemini-mcp");
   assert.ok(j.result.capabilities.tools);
   assert.match(j.result.instructions, /gap-filler and a verifier/);
   assert.match(j.result.instructions, /Critique-then-refine/);

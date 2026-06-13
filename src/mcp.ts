@@ -24,7 +24,7 @@ function initializeResult(params: any) {
   return {
     protocolVersion,
     capabilities: { tools: { listChanged: false } },
-    serverInfo: { name: "gemini-connector", title: "Gemini Connector", version: "1.0.0" },
+    serverInfo: { name: "gemini-mcp", title: "Gemini MCP", version: "1.0.0" },
     instructions: SERVER_INSTRUCTIONS,
   };
 }

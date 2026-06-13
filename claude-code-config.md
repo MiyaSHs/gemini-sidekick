@@ -6,7 +6,7 @@ This makes the connector available in **every** Claude Code project on this mach
 
 ```bash
 claude mcp add --scope user --transport http gemini \
-  "https://gemini-connector.<your-subdomain>.workers.dev/<CONNECTOR_SECRET>/mcp"
+  "https://gemini-mcp.<your-subdomain>.workers.dev/<CONNECTOR_SECRET>/mcp"
 ```
 
 Verify with `claude mcp list`. (Under the hood this adds an `mcpServers` entry to your user

@@ -8,7 +8,7 @@
 // plus one image generate + one edit by default). Cheaper/fuller modes below.
 //
 // Usage:
-//   GEMINI_MCP_URL="https://gemini-connector.<sub>.workers.dev/<SECRET>/mcp" node scripts/smoke.mjs
+//   GEMINI_MCP_URL="https://gemini-mcp.<sub>.workers.dev/<SECRET>/mcp" node scripts/smoke.mjs
 //   ... npm run smoke
 //
 // Flags:
@@ -21,7 +21,7 @@
 
 const URL_ = process.env.GEMINI_MCP_URL;
 if (!URL_ || !/\/mcp$/.test(URL_)) {
-  console.error("Set GEMINI_MCP_URL to your full connector URL ending in /mcp, e.g.\n  GEMINI_MCP_URL=\"https://gemini-connector.<sub>.workers.dev/<SECRET>/mcp\" node scripts/smoke.mjs");
+  console.error("Set GEMINI_MCP_URL to your full connector URL ending in /mcp, e.g.\n  GEMINI_MCP_URL=\"https://gemini-mcp.<sub>.workers.dev/<SECRET>/mcp\" node scripts/smoke.mjs");
   process.exit(2);
 }
 const args = new Set(process.argv.slice(2));
@@ -87,7 +87,7 @@ const run = async () => {
 
   await step("initialize", async () => {
     const r = await rpc("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "smoke", version: "1" } });
-    if (r.serverInfo?.name !== "gemini-connector") throw new Error("unexpected serverInfo");
+    if (r.serverInfo?.name !== "gemini-mcp") throw new Error("unexpected serverInfo");
     return `proto ${r.protocolVersion}`;
   });
   await rpc("notifications/initialized").catch(() => {});

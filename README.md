@@ -52,7 +52,7 @@ workflow becomes **edit → `update.sh` → live**. In the Cloudflare dashboard:
    authorize GitHub → pick `MiyaSHs/GEMINI-MCP`.
 3. **Build settings:** production branch `main`; build command `npm install`; deploy command
    `npx wrangler deploy`; root directory `/`. Save & deploy. The URL comes from the worker `name`
-   in `wrangler.jsonc` → `https://gemini-connector.<your-subdomain>.workers.dev` (change `name`
+   in `wrangler.jsonc` → `https://gemini-mcp.<your-subdomain>.workers.dev` (change `name`
    first if you want a different URL).
 4. **Set the two secrets once** (they persist across every future deploy): the worker → *Settings*
    → *Variables and Secrets* → add as **encrypted Secret**:
@@ -98,12 +98,12 @@ npx wrangler deploy
 
 ### Your connector URL (both options)
 
-Cloudflare gives the worker a URL like `https://gemini-connector.<your-subdomain>.workers.dev`
+Cloudflare gives the worker a URL like `https://gemini-mcp.<your-subdomain>.workers.dev`
 (shown in the dashboard, and printed by `wrangler deploy`). **Your connector URL is that plus
 `/<CONNECTOR_SECRET>/mcp`:**
 
 ```
-https://gemini-connector.<your-subdomain>.workers.dev/<CONNECTOR_SECRET>/mcp
+https://gemini-mcp.<your-subdomain>.workers.dev/<CONNECTOR_SECRET>/mcp
 ```
 
 Open the bare worker URL in a browser — it should say *"Gemini MCP connector is running"* (it
@@ -122,7 +122,7 @@ into Settings → Profile → **"Instructions for Claude."**
 
 ```bash
 claude mcp add --scope user --transport http gemini \
-  "https://gemini-connector.<your-subdomain>.workers.dev/<CONNECTOR_SECRET>/mcp"
+  "https://gemini-mcp.<your-subdomain>.workers.dev/<CONNECTOR_SECRET>/mcp"
 ```
 
 `--scope user` makes it available in **every** project. Then add the philosophy + usage block
@@ -137,7 +137,7 @@ against real Gemini, with no Claude in the loop (so it's deterministic and scrip
 a few cents of real calls.
 
 ```bash
-GEMINI_MCP_URL="https://gemini-connector.<your-subdomain>.workers.dev/<CONNECTOR_SECRET>/mcp" npm run smoke
+GEMINI_MCP_URL="https://gemini-mcp.<your-subdomain>.workers.dev/<CONNECTOR_SECRET>/mcp" npm run smoke
 ```
 
 - `npm run smoke -- --cheap` — protocol + model list + one flash call only (near-free).
