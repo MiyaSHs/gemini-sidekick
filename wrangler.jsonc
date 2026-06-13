@@ -2,7 +2,7 @@
   // Cloudflare Worker config for the personal Gemini MCP connector.
   // Docs: https://developers.cloudflare.com/workers/wrangler/configuration/
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "gemini-connector",
+  "name": "gemini-mcp",
   "main": "src/index.ts",
   "compatibility_date": "2025-06-01",
 
