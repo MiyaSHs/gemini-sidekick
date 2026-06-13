@@ -96,16 +96,18 @@ npx wrangler deploy
 #   npx wrangler kv namespace create MEDIA
 ```
 
-Wrangler prints your Worker URL, e.g. `https://gemini-connector.<your-subdomain>.workers.dev`.
+### Your connector URL (both options)
 
-**Your connector URL is that, plus `/<CONNECTOR_SECRET>/mcp`:**
+Cloudflare gives the worker a URL like `https://gemini-connector.<your-subdomain>.workers.dev`
+(shown in the dashboard, and printed by `wrangler deploy`). **Your connector URL is that plus
+`/<CONNECTOR_SECRET>/mcp`:**
 
 ```
 https://gemini-connector.<your-subdomain>.workers.dev/<CONNECTOR_SECRET>/mcp
 ```
 
-Visit the bare Worker URL in a browser — it should say *"Gemini MCP connector is running"* (it
-never reveals the secret). If you change the KV id later, re-run `npx wrangler deploy`.
+Open the bare worker URL in a browser — it should say *"Gemini MCP connector is running"* (it
+never reveals the secret).
 
 ### Connect it to claude.ai (web + mobile + Desktop share this)
 
@@ -190,6 +192,18 @@ budget alert is what tells you.
   an API URL path (injection protection).
 - Stored image bytes are copied into an exact-length buffer, so no pooled/shared memory can
   leak into a stored image or a subsequent edit.
+
+## Publishing this repo (it's public-safe)
+
+Nothing secret is committed, so this repo is safe to make public:
+
+- **`GEMINI_API_KEY` and `CONNECTOR_SECRET` are never in the repo.** They live as encrypted
+  Cloudflare Worker secrets; `.dev.vars` (local only) is gitignored.
+- **The KV namespace id in `wrangler.jsonc` is not a secret** — it's an account-scoped resource
+  handle that does nothing without your Cloudflare credentials.
+
+If someone forks this, they create their own KV namespace, replace that one id, and set their own
+two secrets — see [Deploy](#deploy). Nothing tied to you exposes anything sensitive.
 
 ## Local development & tests
 
