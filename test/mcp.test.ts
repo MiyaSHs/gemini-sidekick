@@ -43,7 +43,9 @@ test("initialize negotiates protocol version (echo known, else latest)", async (
   const older: any = await (await post(rpc("initialize", { protocolVersion: "2024-11-05" }))).json();
   assert.equal(older.result.protocolVersion, "2024-11-05");
   const unknown: any = await (await post(rpc("initialize", { protocolVersion: "1999-01-01" }))).json();
-  assert.equal(unknown.result.protocolVersion, "2025-06-18");
+  assert.equal(unknown.result.protocolVersion, "2025-11-25"); // newest supported
+  const current: any = await (await post(rpc("initialize", { protocolVersion: "2025-11-25" }))).json();
+  assert.equal(current.result.protocolVersion, "2025-11-25");
 });
 
 test("tools/list returns all 8 tools; structured tools carry an outputSchema", async () => {
@@ -54,6 +56,9 @@ test("tools/list returns all 8 tools; structured tools carry an outputSchema", a
     assert.ok(names.includes(n), `missing ${n}`);
   }
   for (const t of j.result.tools) assert.ok(t.inputSchema, `${t.name} missing inputSchema`);
+  for (const t of j.result.tools) assert.equal(typeof t.annotations?.readOnlyHint, "boolean", `${t.name} missing annotations`);
+  assert.equal(j.result.tools.find((t: any) => t.name === "list_gemini_models").annotations.readOnlyHint, true);
+  assert.equal(j.result.tools.find((t: any) => t.name === "generate_image").annotations.readOnlyHint, false);
   const audit = j.result.tools.find((t: any) => t.name === "gemini_audit");
   assert.ok(audit.outputSchema, "gemini_audit should declare an outputSchema");
   assert.deepEqual(audit.outputSchema.required, ["verdict", "confidence", "summary", "issues"]);

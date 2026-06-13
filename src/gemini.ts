@@ -51,7 +51,7 @@ export class GeminiClient {
     }
     const models: GeminiModel[] = [];
     let pageToken: string | undefined;
-    for (let page = 0; page < 20; page++) {
+    for (let page = 0; page < 8; page++) {
       const url = new URL(`${BASE}/models`);
       url.searchParams.set("pageSize", "200");
       if (pageToken) url.searchParams.set("pageToken", pageToken);
@@ -173,7 +173,7 @@ const has = (m: GeminiModel, method: string) =>
 const nameHas = (m: GeminiModel, s: string) => bare(m).toLowerCase().includes(s);
 
 // Rough "newness" score: sum the numeric runs in the id so gemini-3.1 ranks above
-// gemini-2.5. Tie-break later by preferring non-preview, larger context.
+// gemini-2.5.
 function versionScore(m: GeminiModel): number {
   const nums = bare(m).match(/\d+/g) ?? [];
   let score = 0;
@@ -183,16 +183,29 @@ function versionScore(m: GeminiModel): number {
   return score;
 }
 
+// Quality tier from the id so a mixed pool prefers the higher-quality model
+// regardless of version number (e.g. *-pro-image beats a newer *-flash-image).
+function qualityRank(m: GeminiModel): number {
+  if (nameHas(m, "ultra")) return 4;
+  if (nameHas(m, "pro")) return 3;
+  if (nameHas(m, "lite")) return 0;
+  if (nameHas(m, "flash")) return 1;
+  return 2; // neutral, e.g. "imagen-4.0-generate-001"
+}
+
 function pick(models: GeminiModel[], pred: (m: GeminiModel) => boolean): string | undefined {
   const matches = models.filter(pred);
   if (matches.length === 0) return undefined;
   matches.sort((a, b) => {
-    const pa = nameHas(a, "preview") || nameHas(a, "exp") ? 0 : 1;
-    const pb = nameHas(b, "preview") || nameHas(b, "exp") ? 0 : 1;
-    if (pa !== pb) return pb - pa; // prefer stable over preview/experimental
+    const qa = qualityRank(a);
+    const qb = qualityRank(b);
+    if (qa !== qb) return qb - qa; // higher quality tier first
     const va = versionScore(a);
     const vb = versionScore(b);
-    if (va !== vb) return vb - va; // prefer newer
+    if (va !== vb) return vb - va; // then newer (so gemini-3.1-pro-preview beats gemini-2.5-pro)
+    const ea = nameHas(a, "exp") ? 1 : 0;
+    const eb = nameHas(b, "exp") ? 1 : 0;
+    if (ea !== eb) return ea - eb; // then non-experimental
     return (b.inputTokenLimit ?? 0) - (a.inputTokenLimit ?? 0);
   });
   return bare(matches[0]);
@@ -217,9 +230,11 @@ export function computeDefaults(models: GeminiModel[]): ModelDefaults {
       pick(models, (m) => isTextModel(m) && nameHas(m, "flash")) ??
       pick(models, isTextModel),
     image_generate:
+      // Best single-shot quality: Imagen Ultra if present, else Nano Banana Pro
+      // (gemini-3-pro-image — 4K, best text rendering), else standard Imagen, else any.
       pick(models, (m) => nameHas(m, "imagen") && nameHas(m, "ultra")) ??
-      pick(models, (m) => nameHas(m, "imagen") && !nameHas(m, "fast")) ??
       pick(models, (m) => isImageEditModel(m) && nameHas(m, "pro")) ??
+      pick(models, (m) => nameHas(m, "imagen") && !nameHas(m, "fast")) ??
       pick(models, isImageGenModel),
     image_generate_fast:
       pick(models, (m) => nameHas(m, "imagen") && nameHas(m, "fast")) ??

@@ -31,8 +31,8 @@ test("computeDefaults picks sensible, task-matched models from the live list", (
   assert.equal(d.video, "veo-3.1-generate-preview"); // long-running
   // fast tier must prefer plain flash over flash-lite
   assert.equal(d.fast, "gemini-3.5-flash");
-  // reasoning prefers a pro text model (newest stable beats older / preview when tied differently)
-  assert.ok(d.reasoning === "gemini-2.5-pro" || d.reasoning === "gemini-3.1-pro-preview");
+  // reasoning prefers the newest pro text model, even when it's a -preview
+  assert.equal(d.reasoning, "gemini-3.1-pro-preview");
 });
 
 test("computeDefaults degrades cleanly when a family is absent", () => {
@@ -42,6 +42,18 @@ test("computeDefaults degrades cleanly when a family is absent", () => {
   assert.equal(d.image_edit, undefined);
   assert.equal(d.video, undefined);
   assert.equal(d.fast, "gemini-3.5-flash");
+});
+
+test("image_generate prefers Nano Banana Pro when no Imagen Ultra is present", () => {
+  const lineup = [
+    m("imagen-4.0-generate-001", ["predict"]), // standard Imagen, no "ultra"
+    m("gemini-3-pro-image", ["generateContent"]),
+    m("gemini-3.1-flash-image", ["generateContent"]),
+  ];
+  const d = computeDefaults(lineup);
+  assert.equal(d.image_generate, "gemini-3-pro-image"); // 4K Nano Banana Pro beats standard Imagen
+  assert.equal(d.image_edit, "gemini-3-pro-image");
+  assert.equal(d.image_edit_fast, "gemini-3.1-flash-image");
 });
 
 test("image capability predicates match the live methods, not guesses", () => {
