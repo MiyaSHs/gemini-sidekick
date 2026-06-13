@@ -416,7 +416,7 @@ async function hostAndDescribe(ctx: ToolCtx, header: string, medias: Media[]): P
     const url = mediaUrl(ctx.origin, id);
     lines.push(`Image ${i} (${m.mimeType}): ${url}`);
     lines.push(`  Markdown: ![image ${i}](${url})`);
-    lines.push(`  Refine it: generate_image(input_image_urls=[\"${url}\"], prompt=\"<your change>\")`);
+    lines.push(`  Refine it: generate_image(input_image_urls=["${url}"], prompt="<your change>")`);
     lines.push("");
     if (SAFE_INLINE_IMAGE_TYPES[m.mimeType.toLowerCase()]) blocks.push(imageBlock(m.b64, m.mimeType));
   }
@@ -648,11 +648,11 @@ async function generateImage(args: Record<string, unknown>, ctx: ToolCtx): Promi
   const canEdit = meta ? modelCanEditImages(meta) : nameLower.includes("image") && !nameLower.includes("imagen");
 
   if (editing && !canEdit) {
-    const suggestion = defaults.image_edit ? ` Try a Nano Banana model like \"${defaults.image_edit}\".` : "";
+    const suggestion = defaults.image_edit ? ` Try a Nano Banana model like "${defaults.image_edit}".` : "";
     return {
       content: [
         textBlock(
-          `\"${modelId}\" can't edit images${isImagen ? " (Imagen only generates)" : ""}. Editing needs a Nano Banana (Gemini image) model.${suggestion}`,
+          `"${modelId}" can't edit images${isImagen ? " (Imagen only generates)" : ""}. Editing needs a Nano Banana (Gemini image) model.${suggestion}`,
         ),
       ],
       isError: true,
@@ -687,7 +687,7 @@ async function generateImage(args: Record<string, unknown>, ctx: ToolCtx): Promi
     return {
       content: [
         textBlock(
-          `\"${modelId}\" returned no image${text ? `. It said: ${truncate(text, 400)}` : " (it may have declined; try rephrasing the prompt)."}`,
+          `"${modelId}" returned no image${text ? `. It said: ${truncate(text, 400)}` : " (it may have declined; try rephrasing the prompt)."}`,
         ),
       ],
       isError: true,
@@ -818,7 +818,7 @@ async function geminiDisagree(args: Record<string, unknown>, ctx: ToolCtx): Prom
   ];
   if (fast === strong) {
     sections.push(
-      `Note: only one suitable model (\"${fast}\") was available, so both sides used it — this reflects self-consistency, not cross-model divergence. Pass distinct fast_model/strong_model for a real contrast.`,
+      `Note: only one suitable model ("${fast}") was available, so both sides used it — this reflects self-consistency, not cross-model divergence. Pass distinct fast_model/strong_model for a real contrast.`,
     );
   }
   sections.push("— Where they diverge is where to dig in and flag to the user. Where they agree, that's cheap confirmation. You still form your own conclusion.");
@@ -911,7 +911,7 @@ async function geminiRaw(args: Record<string, unknown>, ctx: ToolCtx): Promise<T
     }
     if (!resp?.done) {
       return {
-        content: [textBlock(`Operation still running. Call gemini_raw again with operation_name=\"${name}\" to keep polling.\n\n${truncate(JSON.stringify(resp), 1500)}`)],
+        content: [textBlock(`Operation still running. Call gemini_raw again with operation_name="${name}" to keep polling.\n\n${truncate(JSON.stringify(resp), 1500)}`)],
       };
     }
     const medias: Media[] = [];
@@ -947,7 +947,7 @@ async function geminiRaw(args: Record<string, unknown>, ctx: ToolCtx): Promise<T
     return {
       content: [
         textBlock(
-          `Long-running job started. Poll it with gemini_raw operation_name=\"${resp.name}\" (repeat until done). Confirm with the user before waiting on expensive jobs like video.`,
+          `Long-running job started. Poll it with gemini_raw operation_name="${resp.name}" (repeat until done). Confirm with the user before waiting on expensive jobs like video.`,
         ),
       ],
     };
