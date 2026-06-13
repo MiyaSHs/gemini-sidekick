@@ -96,6 +96,30 @@ from [`claude-code-config.md`](./claude-code-config.md) to your global `~/.claud
 
 ---
 
+## Verify it works (after deploy)
+
+**Automated smoke test** — speaks MCP straight to your deployed Worker and exercises each tool
+against real Gemini, with no Claude in the loop (so it's deterministic and scriptable). It makes
+a few cents of real calls.
+
+```bash
+GEMINI_MCP_URL="https://gemini-connector.<your-subdomain>.workers.dev/<CONNECTOR_SECRET>/mcp" npm run smoke
+```
+
+- `npm run smoke -- --cheap` — protocol + model list + one flash call only (near-free).
+- `npm run smoke -- --no-image` — skip the (priciest) image generate/edit calls.
+- `npm run smoke -- --full` — also run `gemini_disagree` (3 calls) and `gemini_digest`.
+
+Exit code is `0` only if every step passed. The secret stays in the env var — it's never written
+to the repo.
+
+**Then a 2-minute manual check in claude.ai web or mobile** — the one thing the script can't
+verify is client-side rendering. Ask it to *"generate an image of a fox, then make it wear a hat,"*
+and confirm you get a working clickable **link** at each step (the inline image won't render there —
+that's expected, and exactly why the link matters).
+
+---
+
 ## Configuration (optional)
 
 Set in `wrangler.jsonc` under `vars`, then redeploy:
