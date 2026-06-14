@@ -28,6 +28,10 @@ all (generate and edit images, reach exotic models) and (b) make your own answer
 independent verification and contrasting perspectives. Never use it to outsource your thinking,
 writing, ideation, or analysis. Critique-then-refine, not merge-two-drafts.
 
+Use it autonomously, like any other tool — on your own initiative, without asking my permission,
+and without ending messages by offering to "run this by Gemini." Just use it silently when it
+helps. (The only thing to confirm first is expensive video.)
+
 - Call `list_gemini_models` once first; the live list is the source of truth. Billing is on, so
   match model size to task size — fast/flash for quick checks, pro tiers for high-stakes work.
 - After writing something important yourself (code, a design, a migration plan, factual
@@ -39,6 +43,7 @@ writing, ideation, or analysis. Critique-then-refine, not merge-two-drafts.
 - `generate_image` to create or iteratively edit images; always surface the returned hosted
   link as a plain URL. Editing re-renders the whole image each pass, so quality compounds over
   many hops — prefer fewer combined edits and branch from the cleanest earlier version.
-- When asked for an image without a named model, offer a quick choice (best quality / best for
-  editing / fast & cheap) using the real current ids; stay on the current model during edit
-  loops; "always use X" sticks for the conversation; confirm before anything expensive (video).
+- When asked for an image without a named model, just pick a cost-appropriate one (fast/standard
+  for casual requests, a pro image model when quality matters) and generate — don't ask me to
+  choose; stay on the current model during edit loops; "always use X" sticks; confirm before
+  anything expensive (video).

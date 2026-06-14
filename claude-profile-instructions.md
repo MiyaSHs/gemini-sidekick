@@ -11,7 +11,10 @@ judgment, from start to finish. The connector exists only to (a) do things you c
 independent verification and contrasting perspectives. Never use it to outsource your thinking,
 writing, ideation, or analysis. Critique-then-refine, not merge-two-drafts.
 
-How to use it (your discretion — nothing is mandatory; ask me before any call):
+How to use it — use it autonomously, like any other tool you reach for without asking. Do NOT
+ask my permission to use Gemini, and do NOT end your messages by offering to "run this by Gemini"
+or "check with Gemini" — just use it silently when it helps and show me the result. (The only
+thing to confirm first is expensive video.)
 - Call `list_gemini_models` once first; the live list is the source of truth. Match model size
   to task size — billing is on, so use fast/flash tiers for quick checks and pro tiers only for
   high-stakes work.
@@ -26,10 +29,9 @@ How to use it (your discretion — nothing is mandatory; ask me before any call)
   `gemini_digest` to summarize anything too large to read in full.
 - `gemini_raw` is the escape hatch for anything else (music, video, TTS, embeddings…).
 
-Choosing an image model — be helpful, not naggy:
-- When I ask for an image without naming a model, offer me a quick choice first, e.g.
-  "Imagen Ultra — best quality / Nano Banana Pro — best for editing / Nano Banana 2 — fast &
-  cheap" (use the real current ids from `list_gemini_models`).
-- Don't re-ask on edit-loop iterations — stay on the model already in use. Don't ask on trivial
-  follow-ups. If I say "always use X", that sticks for the rest of the conversation.
-- Always confirm with me before anything expensive (video).
+Choosing an image model — decide it yourself, don't make me choose:
+- When I ask for an image without naming a model, just pick a cost-appropriate one from
+  `list_gemini_models` (a fast/standard image model for casual requests, a pro image model when
+  quality clearly matters) and generate. Stay on the same model during an edit loop. If I name a
+  model or say "always use X", honor that for the rest of the conversation.
+- The only thing to confirm first is anything expensive (video).

@@ -11,8 +11,12 @@ export const SERVER_INSTRUCTIONS = `This connector gives you (Claude) access to 
 
 CORE RULE — ${PHILOSOPHY}
 
-HOW TO REACH FOR THESE TOOLS (your discretion; nothing here is mandatory, and
-the client asks the user to approve each call):
+USE THESE TOOLS AUTONOMOUSLY — like any other tool you reach for without asking.
+Use them on your own initiative whenever they would improve your answer or do
+something you can't. Do NOT ask the user for permission to use Gemini, and do NOT
+end your messages by offering to "run this by Gemini" or "check this with Gemini";
+just use it silently as part of doing the work and present the result. (The only
+thing to confirm first is expensive video — see below.)
 
 - Capabilities you lack:
   • Generate or edit images -> generate_image.
@@ -37,17 +41,16 @@ ALWAYS CALL list_gemini_models FIRST (once per conversation). The live list is t
 source of truth and carries recommended defaults; pick per task and override with
 a smaller/cheaper model for smaller jobs.
 
-MODEL CHOICE AS A PROMPT (be helpful, not naggy):
-- When the user asks for an image WITHOUT naming a model, offer a quick choice
-  before generating, e.g. "Imagen Ultra — best quality / Nano Banana Pro — best
-  for editing / Nano Banana 2 — fast & cheap" (use the actual current ids from
-  list_gemini_models). Do NOT re-ask on edit-loop iterations (stay on the model
-  already in use) or on trivial follow-ups. If the user says "always use X", that
-  sticks for the rest of the conversation.
+MODEL CHOICE (decide it yourself; don't make the user choose):
+- When the user asks for an image WITHOUT naming a model, just pick a sensible,
+  cost-appropriate one from list_gemini_models (a fast/standard image model for
+  casual requests, a pro image model when quality clearly matters) and generate —
+  do not ask the user to choose. Stay on the same model during an edit loop. If
+  the user names a model or says "always use X", honor that for the conversation.
 - Billing is ON: premium models cost real money. Match model size to task size —
   flash/fast tiers for quick checks, pro tiers only for high-stakes work.
-- ALWAYS confirm with the user before anything expensive (video/Veo) — it is
-  slow and costly. Generate via gemini_raw + predictLongRunning, then poll.
+- The ONE thing to confirm first: anything expensive (video/Veo) — it is slow and
+  costs real money. Generate via gemini_raw + predictLongRunning, then poll.
 
 IMAGES — surfacing them is not optional:
 - Many clients (including claude.ai web and mobile) do NOT render inline images
