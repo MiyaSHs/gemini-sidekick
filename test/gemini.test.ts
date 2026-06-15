@@ -66,6 +66,21 @@ test("only deep-research specialists are excluded from text defaults", () => {
   assert.equal(computeDefaults([m("deep-research-pro-preview-12-2025", ["generateContent"])]).reasoning, undefined);
 });
 
+test("version ranking ignores date/build stamps and prefers the real version", () => {
+  // A stamped experimental model must not outrank a real version of the same tier.
+  const d1 = computeDefaults([
+    m("gemini-pro-exp-1206", ["generateContent"]),
+    m("gemini-3.1-pro-preview", ["generateContent"]),
+  ]);
+  assert.equal(d1.reasoning, "gemini-3.1-pro-preview");
+  // A large patch/build suffix must not let an older minor version win.
+  const d2 = computeDefaults([
+    m("gemini-2.5-flash-9999", ["generateContent"]),
+    m("gemini-2.6-flash", ["generateContent"]),
+  ]);
+  assert.equal(d2.fast, "gemini-2.6-flash");
+});
+
 test("image capability predicates match the live methods, not guesses", () => {
   assert.equal(modelIsImagen(m("imagen-4.0-ultra-generate-001", ["predict"])), true);
   assert.equal(modelCanEditImages(m("imagen-4.0-ultra-generate-001", ["predict"])), false); // Imagen can't edit

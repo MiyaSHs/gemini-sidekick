@@ -172,15 +172,14 @@ const has = (m: GeminiModel, method: string) =>
   (m.supportedGenerationMethods ?? []).includes(method);
 const nameHas = (m: GeminiModel, s: string) => bare(m).toLowerCase().includes(s);
 
-// Rough "newness" score: sum the numeric runs in the id so gemini-3.1 ranks above
-// gemini-2.5.
-function versionScore(m: GeminiModel): number {
-  const nums = bare(m).match(/\d+/g) ?? [];
-  let score = 0;
-  for (let i = 0; i < nums.length; i++) {
-    score += parseInt(nums[i], 10) / Math.pow(100, i);
-  }
-  return score;
+// Semantic version tuple [major, minor] from the id's leading version
+// (e.g. "gemini-3.1-pro" -> [3,1], "gemini-3-pro" -> [3,0]). Standalone runs of
+// 3+ digits are build/date stamps (e.g. "...-exp-1206", "...-001"), NOT versions,
+// so they're ignored — a stamped experimental model must not outrank a real
+// version of the same quality tier. Returns [] when there's no clean version.
+function versionTuple(m: GeminiModel): number[] {
+  const v = bare(m).match(/(?<!\d)(\d{1,2})(?:\.(\d{1,2}))?(?!\d)/);
+  return v ? [Number(v[1]), v[2] ? Number(v[2]) : 0] : [];
 }
 
 // Quality tier from the id so a mixed pool prefers the higher-quality model
@@ -200,9 +199,14 @@ function pick(models: GeminiModel[], pred: (m: GeminiModel) => boolean): string 
     const qa = qualityRank(a);
     const qb = qualityRank(b);
     if (qa !== qb) return qb - qa; // higher quality tier first
-    const va = versionScore(a);
-    const vb = versionScore(b);
-    if (va !== vb) return vb - va; // then newer (so gemini-3.1-pro-preview beats gemini-2.5-pro)
+    const ta = versionTuple(a);
+    const tb = versionTuple(b);
+    // A model with a real version beats a version-less build (e.g. an exp date-stamp).
+    if ((ta.length > 0) !== (tb.length > 0)) return ta.length > 0 ? -1 : 1;
+    for (let i = 0; i < Math.max(ta.length, tb.length); i++) {
+      const d = (tb[i] ?? 0) - (ta[i] ?? 0);
+      if (d !== 0) return d; // higher version first (so gemini-3.1-pro beats gemini-2.5-pro)
+    }
     const ea = nameHas(a, "exp") ? 1 : 0;
     const eb = nameHas(b, "exp") ? 1 : 0;
     if (ea !== eb) return ea - eb; // then non-experimental

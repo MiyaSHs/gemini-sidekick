@@ -112,6 +112,12 @@ export async function handleMcpPost(request: Request, ctx: ToolCtx): Promise<Res
   if (responses.length === 0) return new Response(null, { status: 202, headers: { "cache-control": "no-store" } });
 
   const payload = Array.isArray(body) ? responses : responses[0];
+  // A client that accepts ONLY event-stream (not JSON) gets the response SSE-framed.
+  // claude.ai/Claude Code send both, so they stay on plain JSON.
+  const accept = request.headers.get("accept") ?? "";
+  if (accept.includes("text/event-stream") && !accept.includes("application/json")) {
+    return sse(responses);
+  }
   return json(payload);
 }
 
@@ -122,6 +128,19 @@ function json(payload: unknown, status = 200): Response {
       "content-type": "application/json",
       "x-content-type-options": "nosniff",
       "cache-control": "no-store",
+    },
+  });
+}
+
+/** Frame JSON-RPC responses as a Server-Sent Events stream for SSE-only clients. */
+function sse(responses: RpcResponse[]): Response {
+  const body = responses.map((r) => `event: message\ndata: ${JSON.stringify(r)}\n\n`).join("");
+  return new Response(body, {
+    status: 200,
+    headers: {
+      "content-type": "text/event-stream",
+      "cache-control": "no-store",
+      "x-content-type-options": "nosniff",
     },
   });
 }

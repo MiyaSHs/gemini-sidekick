@@ -45,6 +45,7 @@ export default {
     // is intentionally NOT behind the connector secret — sharing an image link
     // never leaks the connector secret.
     if (path.startsWith("/img/")) {
+      if (request.method !== "GET" && request.method !== "HEAD") return text("Method not allowed", 405);
       const id = decodeURIComponent(path.slice("/img/".length));
       return withCors(await serveMedia(env, id));
     }
