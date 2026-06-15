@@ -59,6 +59,13 @@ test("image_generate prefers Nano Banana Pro when no Imagen Ultra is present", (
   assert.equal(d.image_edit_fast, "gemini-3.1-flash-image");
 });
 
+test("only deep-research specialists are excluded from text defaults", () => {
+  // A general model that merely contains "research" is still eligible as a default.
+  assert.equal(computeDefaults([m("gemini-research-pro", ["generateContent"])]).reasoning, "gemini-research-pro");
+  // A deep-research specialist alone yields no text default (it is excluded).
+  assert.equal(computeDefaults([m("deep-research-pro-preview-12-2025", ["generateContent"])]).reasoning, undefined);
+});
+
 test("image capability predicates match the live methods, not guesses", () => {
   assert.equal(modelIsImagen(m("imagen-4.0-ultra-generate-001", ["predict"])), true);
   assert.equal(modelCanEditImages(m("imagen-4.0-ultra-generate-001", ["predict"])), false); // Imagen can't edit

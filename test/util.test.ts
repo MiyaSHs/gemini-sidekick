@@ -140,5 +140,14 @@ test("assertPublicHttpUrl allows public http(s) and blocks SSRF targets", () => 
   assert.throws(() => assertPublicHttpUrl("http://172.16.0.1/x"), /private|loopback/);
   assert.throws(() => assertPublicHttpUrl("http://169.254.169.254/latest/meta-data"), /private|loopback/);
   assert.throws(() => assertPublicHttpUrl("http://[::1]/x"), /IPv6|private|loopback/);
+  // IPv4-mapped (::ffff:x) and NAT64 (64:ff9b::x) smuggling a private IPv4
+  assert.throws(() => assertPublicHttpUrl("http://[::ffff:127.0.0.1]/x"), /IPv6|private|loopback/);
+  assert.throws(() => assertPublicHttpUrl("http://[::ffff:169.254.169.254]/x"), /IPv6|private|loopback/);
+  assert.throws(() => assertPublicHttpUrl("http://[64:ff9b::7f00:1]/x"), /IPv6|private|loopback/);
+  // full link-local (fe80::/10) and unique-local (fc00::/7) ranges, not just exact prefixes
+  assert.throws(() => assertPublicHttpUrl("http://[fe9a::1]/x"), /IPv6|private|loopback/);
+  assert.throws(() => assertPublicHttpUrl("http://[fd12:3456::1]/x"), /IPv6|private|loopback/);
+  // a genuine global IPv6 is still allowed
+  assert.equal(assertPublicHttpUrl("http://[2606:4700:4700::1111]/x").protocol, "http:");
   assert.throws(() => assertPublicHttpUrl("not a url"), /valid URL/);
 });

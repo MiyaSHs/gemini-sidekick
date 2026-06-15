@@ -45,6 +45,31 @@ test("processMedia leaves media-free payloads untouched", () => {
   assert.deepEqual(redacted, resp);
 });
 
+test("processMedia recurses into sibling keys — no media dropped or leaked", () => {
+  // A node carries inlineData AND a sibling key that itself contains nested media.
+  const resp = {
+    part: {
+      inlineData: { mimeType: "image/png", data: "AAAA" },
+      sibling: { inlineData: { mimeType: "image/jpeg", data: "BBBB" } },
+    },
+  };
+  const out: any[] = [];
+  const redacted = processMedia(resp, out);
+  assert.equal(out.length, 2); // both blobs collected, not just the first
+  assert.ok(out.some((media) => media.b64 === "AAAA"));
+  assert.ok(out.some((media) => media.b64 === "BBBB"));
+  // both are redacted in the returned copy (no raw base64 leaks back to the model)
+  assert.match(redacted.part.inlineData.data, /hosted separately/);
+  assert.match(redacted.part.sibling.inlineData.data, /hosted separately/);
+});
+
+test("processMedia is depth-bounded and does not overflow on deep input", () => {
+  let deep: any = { leaf: true };
+  for (let i = 0; i < 5000; i++) deep = { nested: deep };
+  const out: any[] = [];
+  assert.doesNotThrow(() => processMedia(deep, out)); // returns instead of RangeError
+});
+
 test("collectUris finds Veo-style output file URIs", () => {
   const resp = {
     response: { generateVideoResponse: { generatedSamples: [{ video: { uri: "https://example.com/v.mp4?key=x" } }] } },

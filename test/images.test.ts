@@ -78,3 +78,18 @@ test("serveMedia rejects malformed ids and missing items with 404", async () => 
   assert.equal((await serveMedia(env, "short")).status, 404);
   assert.equal((await serveMedia(env, "ValidLookingButMissingId123")).status, 404);
 });
+
+test("storeMedia refuses media over the KV value limit (clean error, never written)", async () => {
+  const kv = mockKV();
+  const env = fakeEnv(kv);
+  const tooBig = new Uint8Array(25 * 1024 * 1024); // > 25 MiB - headroom
+  await assert.rejects(() => storeMedia(env, tooBig, "image/png"), /hosting limit/);
+  assert.equal(kv.store.size, 0); // nothing was written to KV
+});
+
+test("storeMedia clamps an over-long mimeType into KV metadata", async () => {
+  const env = fakeEnv(mockKV());
+  const id = await storeMedia(env, new Uint8Array([1, 2, 3]), "image/" + "x".repeat(500));
+  const got = await getMedia(env, id);
+  assert.ok(got!.mimeType.length <= 255);
+});
