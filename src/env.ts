@@ -10,4 +10,5 @@ export interface Env {
   // Vars (wrangler.jsonc):
   DAILY_CALL_CAP?: string; // "0"/"" disables; otherwise max billable calls per UTC day.
   IMAGE_TTL_SECONDS?: string; // KV TTL for hosted media. Default 30 days.
+  ALLOWED_ORIGINS?: string; // Comma-separated browser origins allowed to call /mcp cross-origin. "*" = any. Empty = built-in claude.ai default.
 }

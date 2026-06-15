@@ -28,7 +28,12 @@
     "DAILY_CALL_CAP": "0",
     // How long hosted images live in KV, in seconds. Default 30 days. Images must
     // outlive an editing session so you can keep refining a result across turns.
-    "IMAGE_TTL_SECONDS": "2592000"
+    "IMAGE_TTL_SECONDS": "2592000",
+    // Browser origins allowed to call the secret /mcp route cross-origin (the public
+    // /img route stays open). Comma-separated. "*" allows any origin (the old
+    // behaviour). Non-browser clients (Claude Code, mobile) send no Origin and are
+    // unaffected — CORS is browser-enforced — so this can't lock those out.
+    "ALLOWED_ORIGINS": "https://claude.ai,https://www.claude.ai"
   },
 
   "observability": {
