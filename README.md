@@ -55,8 +55,6 @@ openssl rand -hex 24
 >    its **Namespace ID**.
 > 3. In your fork on GitHub, open `wrangler.jsonc`, replace the `id` on the `MEDIA` binding with
 >    that value, and commit.
->
-> *(Original author: already set — skip this.)*
 
 ### Option A — Connect the repo to Cloudflare (recommended; no local tooling)
 
@@ -182,6 +180,10 @@ Set in `wrangler.jsonc` under `vars`, then redeploy:
   runaway loop, not to do accounting. Listing models and polling operations don't count.
 - **`IMAGE_TTL_SECONDS`** — how long hosted images live in KV (default `2592000` = 30 days).
   Images must outlive an editing session so you can keep refining a result across turns.
+- **`ALLOWED_ORIGINS`** — comma-separated browser origins allowed to call the secret `/mcp`
+  route cross-origin (default `https://claude.ai,https://www.claude.ai`). The public `/img`
+  route stays open. `"*"` allows any origin. Non-browser clients (Claude Code, mobile) send no
+  Origin and are unaffected — CORS is browser-enforced — so this can't lock those out.
 
 > Free-tier KV allows ~1,000 writes/day. Each generated/edited image is one write (and,
 > if `DAILY_CALL_CAP` is on, each billable call is one more). That's plenty for personal use,
@@ -207,22 +209,25 @@ budget alert is what tells you.
 - **The image route can't become an XSS vector.** Only safe raster types (PNG/JPEG/WebP/GIF)
   are served inline; anything else (e.g. SVG) is forced to download, under a strict
   `Content-Security-Policy` and `X-Content-Type-Options: nosniff`.
+- **The secret `/mcp` route is CORS-locked** to an origin allow-list (see `ALLOWED_ORIGINS`),
+  so a site that learns your URL can't drive the connector from a victim's browser.
 - Model names and API methods are validated against allow-lists before they're ever placed in
-  an API URL path (injection protection).
+  an API URL path (injection protection), and outbound fetches of user-supplied URLs are
+  re-validated on every redirect hop (SSRF protection).
 - Stored image bytes are copied into an exact-length buffer, so no pooled/shared memory can
   leak into a stored image or a subsequent edit.
 
-## Publishing this repo (it's public-safe)
+## Secrets — what's committed, what isn't
 
-Nothing secret is committed, so this repo is safe to make public:
+No secrets are committed, so a fork is safe to keep public:
 
 - **`GEMINI_API_KEY` and `CONNECTOR_SECRET` are never in the repo.** They live as encrypted
   Cloudflare Worker secrets; `.dev.vars` (local only) is gitignored.
 - **The KV namespace id in `wrangler.jsonc` is not a secret** — it's an account-scoped resource
-  handle that does nothing without your Cloudflare credentials.
+  handle that does nothing without your Cloudflare credentials, so it's safe to commit.
 
-If someone forks this, they create their own KV namespace, replace that one id, and set their own
-two secrets — see [Deploy](#deploy). Nothing tied to you exposes anything sensitive.
+To stand up your own copy, create a KV namespace, swap that id, and set your two secrets — see
+[Deploy](#deploy).
 
 ## Local development & tests
 
@@ -234,7 +239,7 @@ npm run typecheck                 # tsc --noEmit over src/
 npm run build                     # dry-run bundle, no deploy
 ```
 
-## Should there be a text-to-speech tool? (the open question)
+## Text-to-speech: why there's no dedicated tool
 
 **Decision: no dedicated TTS tool — it's covered by the `gemini_raw` escape hatch, whose audio
 output is auto-hosted at a link.** Reasoning:
@@ -247,9 +252,9 @@ output is auto-hosted at a link.** Reasoning:
   return a link" treatment images get. `gemini_raw` already does that automatically for any
   inline media in a response, so TTS audio comes back as a clickable URL with **zero** extra
   surface.
-- You removed TTS once already, which signals it's low-frequency for you. A leaner tool list
-  also serves the "proactive but never naggy" goal: fewer tools means Claude routes to the
-  right one more reliably.
+- A leaner tool list serves the "proactive but never naggy" goal: fewer tools means Claude
+  routes to the right one more reliably, so a low-frequency capability is better left in the
+  escape hatch than promoted to its own tool.
 - If you find yourself reaching for it constantly, promoting it to a first-class tool later is
   a small change (it would mostly be the hosting wiring, which already exists).
 
