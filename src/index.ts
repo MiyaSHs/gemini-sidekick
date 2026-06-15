@@ -11,6 +11,8 @@ const CORS: Record<string, string> = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, Mcp-Session-Id, MCP-Protocol-Version, Accept, Last-Event-ID",
   "Access-Control-Expose-Headers": "Mcp-Session-Id, MCP-Protocol-Version",
   "Access-Control-Max-Age": "86400",
+  // The connector secret lives in the URL path; keep it out of Referer headers.
+  "Referrer-Policy": "no-referrer",
 };
 
 function withCors(res: Response): Response {
@@ -22,7 +24,7 @@ function withCors(res: Response): Response {
 function text(body: string, status: number): Response {
   return new Response(body, {
     status,
-    headers: { "content-type": "text/plain; charset=utf-8", ...CORS },
+    headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", ...CORS },
   });
 }
 

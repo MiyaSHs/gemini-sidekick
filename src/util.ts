@@ -140,12 +140,49 @@ export function sanitizeOperationName(name: unknown): string {
   return name.trim();
 }
 
+/** True if an IPv4 (first two octets suffice) is loopback/private/link-local/reserved. */
+function ipv4Private(a: number, b: number): boolean {
+  return (
+    a === 0 || a === 127 || a === 10 ||
+    (a === 169 && b === 254) || // link-local
+    (a === 172 && b >= 16 && b <= 31) || // private
+    (a === 192 && b === 168) || // private
+    a >= 224 // multicast / reserved
+  );
+}
+
+/**
+ * True if an IPv6 host literal is loopback/unspecified/link-local/unique-local,
+ * or an IPv4-mapped (::ffff:x) / NAT64 (64:ff9b::x) address smuggling a private
+ * IPv4 through an IPv6 host. `host` is already lowercased with brackets stripped.
+ */
+function ipv6Forbidden(host: string): boolean {
+  const mapped = host.match(/^(?:::ffff:|64:ff9b::)(.+)$/);
+  if (mapped) {
+    const dotted = mapped[1].match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+    if (dotted) return ipv4Private(Number(dotted[1]), Number(dotted[2]));
+    const hex = mapped[1].match(/^([0-9a-f]{1,4}):[0-9a-f]{1,4}$/);
+    if (hex) {
+      const hi = parseInt(hex[1], 16);
+      return ipv4Private((hi >> 8) & 0xff, hi & 0xff);
+    }
+    return true; // mapped/NAT64 with an unrecognized tail — refuse to be safe
+  }
+  return (
+    host === "::" || host === "::1" ||
+    /^fe[89ab]/.test(host) || // fe80::/10 link-local
+    /^f[cd]/.test(host) // fc00::/7 unique-local
+  );
+}
+
 /**
  * Best-effort SSRF guard for server-side fetches of user-supplied URLs.
- * Allows only http(s) and rejects loopback / private / link-local literals.
- * Note: this does not resolve DNS, so it can't stop a public hostname that
- * points at a private IP — Cloudflare's runtime blocks most internal targets,
- * and this is a personal, secret-gated tool, so this is defence-in-depth.
+ * Allows only http(s) and rejects loopback / private / link-local literals
+ * (incl. IPv4-mapped and NAT64 IPv6 forms). Note: this does not resolve DNS, so
+ * it can't stop a public hostname that points at a private IP — Cloudflare's
+ * runtime blocks most internal targets, callers follow redirects manually and
+ * re-validate each hop, and this is a personal, secret-gated tool, so this is
+ * defence-in-depth.
  */
 export function assertPublicHttpUrl(raw: string): URL {
   let u: URL;
@@ -167,21 +204,11 @@ export function assertPublicHttpUrl(raw: string): URL {
     throw new CleanError("Refusing to fetch an internal host.");
   }
   const v4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (v4) {
-    const a = Number(v4[1]);
-    const b = Number(v4[2]);
-    if (
-      a === 0 || a === 127 || a === 10 ||
-      (a === 169 && b === 254) || // link-local
-      (a === 172 && b >= 16 && b <= 31) || // private
-      (a === 192 && b === 168) || // private
-      a >= 224 // multicast / reserved
-    ) {
-      throw new CleanError("Refusing to fetch a private, loopback, or link-local address.");
-    }
+  if (v4 && ipv4Private(Number(v4[1]), Number(v4[2]))) {
+    throw new CleanError("Refusing to fetch a private, loopback, or link-local address.");
   }
-  if (host === "::" || host === "::1" || host.startsWith("fe80") || host.startsWith("fc") || host.startsWith("fd")) {
-    throw new CleanError("Refusing to fetch a private or loopback IPv6 address.");
+  if (host.includes(":") && ipv6Forbidden(host)) {
+    throw new CleanError("Refusing to fetch a private, loopback, or link-local IPv6 address.");
   }
   return u;
 }

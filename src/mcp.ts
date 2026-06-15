@@ -72,6 +72,12 @@ async function dispatch(method: string, params: any, id: Id, ctx: ToolCtx): Prom
 
 /** Handle one Streamable-HTTP POST containing one JSON-RPC message (or a batch). */
 export async function handleMcpPost(request: Request, ctx: ToolCtx): Promise<Response> {
+  // If a protocol-version header is present it MUST be one we support (spec).
+  const pv = request.headers.get("mcp-protocol-version");
+  if (pv && !SUPPORTED_PROTOCOLS.includes(pv)) {
+    return json(err(null, -32600, `Unsupported MCP-Protocol-Version: ${truncate(pv, 40)}.`), 400);
+  }
+
   let body: any;
   try {
     body = await request.json();
@@ -79,26 +85,43 @@ export async function handleMcpPost(request: Request, ctx: ToolCtx): Promise<Res
     return json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error: body is not valid JSON." } });
   }
 
+  // Guard the shared per-request budget: batching was removed in MCP 2025-06-18,
+  // and a batch shares this stateless Worker's subrequest/memory limits, so cap it.
+  if (Array.isArray(body)) {
+    if (body.length > 20) return json(err(null, -32600, "Batch too large; send fewer messages per request."));
+    const toolCalls = body.filter((m) => m && typeof m === "object" && m.method === "tools/call").length;
+    if (toolCalls > 1) return json(err(null, -32600, "This connector accepts at most one tools/call per request."));
+  }
+
   const messages = Array.isArray(body) ? body : [body];
   const responses: RpcResponse[] = [];
 
   for (const msg of messages) {
-    if (!msg || typeof msg !== "object" || typeof msg.method !== "string") continue; // ignore responses/garbage
+    if (!msg || typeof msg !== "object") continue; // ignore non-objects/garbage
     const isNotification = msg.id === undefined || msg.id === null;
+    if (typeof msg.method !== "string") {
+      // A request (carries an id) with no valid method is malformed → -32600.
+      if (!isNotification) responses.push(err(msg.id, -32600, "Invalid Request: missing or invalid method."));
+      continue; // an id-less message with no method is ignorable garbage
+    }
     if (isNotification) continue; // notifications (e.g. notifications/initialized) need no reply
     responses.push(await dispatch(msg.method, msg.params, msg.id, ctx));
   }
 
   // Body contained only notifications — acknowledge with 202 and no content.
-  if (responses.length === 0) return new Response(null, { status: 202 });
+  if (responses.length === 0) return new Response(null, { status: 202, headers: { "cache-control": "no-store" } });
 
   const payload = Array.isArray(body) ? responses : responses[0];
   return json(payload);
 }
 
-function json(payload: unknown): Response {
+function json(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
-    status: 200,
-    headers: { "content-type": "application/json" },
+    status,
+    headers: {
+      "content-type": "application/json",
+      "x-content-type-options": "nosniff",
+      "cache-control": "no-store",
+    },
   });
 }

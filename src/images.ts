@@ -1,7 +1,9 @@
 import type { Env } from "./env.ts";
-import { randomToken, SAFE_INLINE_IMAGE_TYPES } from "./util.ts";
+import { CleanError, randomToken, SAFE_INLINE_IMAGE_TYPES } from "./util.ts";
 
 const DEFAULT_TTL = 2592000; // 30 days
+// Cloudflare KV's hard value limit is 25 MiB; leave headroom for metadata.
+const MAX_MEDIA_BYTES = 25 * 1024 * 1024 - 4096;
 
 interface StoredMeta {
   mimeType: string;
@@ -18,9 +20,14 @@ export async function storeMedia(
   bytes: Uint8Array,
   mimeType: string,
 ): Promise<string> {
+  if (bytes.byteLength > MAX_MEDIA_BYTES) {
+    throw new CleanError(
+      `Generated media is ${(bytes.byteLength / 1048576).toFixed(1)}MB — over the ~25MB hosting limit. Try a smaller image_size (e.g. 1K/2K) or a non-4K model.`,
+    );
+  }
   const id = randomToken(18);
   const ttl = parseInt(env.IMAGE_TTL_SECONDS ?? "", 10);
-  const meta: StoredMeta = { mimeType, createdAt: Date.now() };
+  const meta: StoredMeta = { mimeType: mimeType.slice(0, 255), createdAt: Date.now() };
   await env.MEDIA.put(`media:${id}`, bytes, {
     expirationTtl: Number.isFinite(ttl) && ttl >= 60 ? ttl : DEFAULT_TTL,
     metadata: meta,

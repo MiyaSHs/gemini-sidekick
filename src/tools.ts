@@ -364,23 +364,31 @@ interface Media {
   b64: string;
 }
 
+// Cap recursion into arbitrary API JSON (especially via gemini_raw) so a deep or
+// cyclic shape can't blow the stack; real responses are only a few levels deep.
+const MAX_WALK_DEPTH = 64;
+
 /** Walk a Gemini response, collecting inline media and returning a redacted copy
  *  (base64 blobs replaced by short placeholders) so we never dump megabytes of
- *  base64 back to the model. Exported for tests. */
-export function processMedia(node: any, out: Media[]): any {
-  if (Array.isArray(node)) return node.map((n) => processMedia(n, out));
+ *  base64 back to the model. Recurses into EVERY key — so media sitting beside
+ *  other keys is still hosted and redacted — with a depth bound. Exported for tests. */
+export function processMedia(node: any, out: Media[], depth = 0): any {
+  if (depth > MAX_WALK_DEPTH) return node;
+  if (Array.isArray(node)) return node.map((n) => processMedia(n, out, depth + 1));
   if (node && typeof node === "object") {
-    const inline = node.inlineData ?? node.inline_data;
-    if (inline && typeof inline.data === "string") {
-      out.push({ mimeType: inline.mimeType ?? inline.mime_type ?? "image/png", b64: inline.data });
-      return { ...node, inlineData: { ...inline, data: `<${inline.data.length}B media, hosted separately>` } };
-    }
-    if (typeof node.bytesBase64Encoded === "string") {
-      out.push({ mimeType: node.mimeType ?? "image/png", b64: node.bytesBase64Encoded });
-      return { ...node, bytesBase64Encoded: `<${node.bytesBase64Encoded.length}B media, hosted separately>` };
-    }
     const copy: any = {};
-    for (const [k, v] of Object.entries(node)) copy[k] = processMedia(v, out);
+    for (const [k, v] of Object.entries(node)) {
+      if ((k === "inlineData" || k === "inline_data") && v && typeof v === "object" && typeof (v as any).data === "string") {
+        const inline = v as any;
+        out.push({ mimeType: inline.mimeType ?? inline.mime_type ?? "image/png", b64: inline.data });
+        copy[k] = { ...inline, data: `<${inline.data.length}B media, hosted separately>` };
+      } else if (k === "bytesBase64Encoded" && typeof v === "string") {
+        out.push({ mimeType: node.mimeType ?? "image/png", b64: v });
+        copy[k] = `<${v.length}B media, hosted separately>`;
+      } else {
+        copy[k] = processMedia(v, out, depth + 1);
+      }
+    }
     return copy;
   }
   return node;
@@ -388,9 +396,10 @@ export function processMedia(node: any, out: Media[]): any {
 
 /** Collect output file/download URIs (e.g. Veo video, which returns a URI rather
  *  than inline bytes) so they can be surfaced as clickable links. Exported for tests. */
-export function collectUris(node: any, out: Set<string>): void {
+export function collectUris(node: any, out: Set<string>, depth = 0): void {
+  if (depth > MAX_WALK_DEPTH) return;
   if (Array.isArray(node)) {
-    for (const n of node) collectUris(n, out);
+    for (const n of node) collectUris(n, out, depth + 1);
     return;
   }
   if (node && typeof node === "object") {
@@ -398,7 +407,7 @@ export function collectUris(node: any, out: Set<string>): void {
       if (typeof v === "string" && /^https?:\/\//i.test(v) && /^(uri|fileUri|file_uri|downloadUri|videoUri)$/i.test(k)) {
         out.add(v);
       } else {
-        collectUris(v, out);
+        collectUris(v, out, depth + 1);
       }
     }
   }
@@ -429,42 +438,90 @@ async function hostAndDescribe(ctx: ToolCtx, header: string, medias: Media[]): P
   return [...blocks, textBlock(lines.join("\n"))];
 }
 
+const MAX_REDIRECTS = 4;
+// Aggregate inline-byte budgets — a 128MB isolate can't hold many large files at
+// once (raw bytes plus ~1.33x base64), so cap the SUM, not just each file.
+const MAX_DIGEST_INLINE_BYTES = 30 * 1024 * 1024;
+const MAX_EDIT_INLINE_BYTES = 28 * 1024 * 1024;
+
+/** Charge bytes against a shared budget; throw a clean error once it's exhausted. */
+function chargeBudget(budget: { left: number }, bytes: number, what: string): void {
+  budget.left -= bytes;
+  if (budget.left < 0) {
+    throw new CleanError(
+      `Combined ${what} exceed the inline memory limit (Worker free tier). Use fewer or smaller inputs, or paste extracted text into 'content'.`,
+    );
+  }
+}
+
+/** Fetch a user-supplied URL, re-validating against SSRF at EVERY hop. fetch()
+ *  follows redirects by default, which would let an allowed URL bounce to an
+ *  internal target — so follow manually and re-check each Location. */
+async function safeFetch(rawUrl: string): Promise<Response> {
+  let target = assertPublicHttpUrl(rawUrl);
+  for (let hop = 0; ; hop++) {
+    const res = await fetch(target, { redirect: "manual" });
+    if (res.status >= 300 && res.status < 400) {
+      const loc = res.headers.get("location");
+      if (!loc) return res;
+      if (hop >= MAX_REDIRECTS) throw new CleanError(`Too many redirects fetching ${truncate(rawUrl, 80)}.`);
+      target = assertPublicHttpUrl(new URL(loc, target).toString());
+      continue;
+    }
+    return res;
+  }
+}
+
 /** Load an image to edit: from our own KV (fast path) or any public http(s) URL. */
-async function loadImageForEdit(ctx: ToolCtx, rawUrl: string): Promise<{ mimeType: string; data: string }> {
+async function loadImageForEdit(
+  ctx: ToolCtx,
+  rawUrl: string,
+  budget?: { left: number },
+): Promise<{ mimeType: string; data: string }> {
   const url = rawUrl.trim();
   const prefix = `${ctx.origin}/img/`;
   if (url.startsWith(prefix)) {
     const id = url.slice(prefix.length).split(/[?#]/)[0];
     const item = await getMedia(ctx.env, id);
-    if (item) return { mimeType: item.mimeType, data: bytesToBase64(item.bytes) };
+    if (item) {
+      if (budget) chargeBudget(budget, item.bytes.byteLength, "input images");
+      return { mimeType: item.mimeType, data: bytesToBase64(item.bytes) };
+    }
     // fall through to a normal fetch if the id wasn't found locally
   }
-  const u = assertPublicHttpUrl(url);
-  const res = await fetch(u);
+  const res = await safeFetch(url);
   if (!res.ok) throw new CleanError(`Couldn't fetch the image to edit (HTTP ${res.status}): ${truncate(url, 120)}`);
-  const ct = (res.headers.get("content-type") ?? "").split(";")[0].trim() || "image/png";
+  const ct = (res.headers.get("content-type") ?? "").split(";")[0].trim().slice(0, 128) || "image/png";
   if (!ct.startsWith("image/")) throw new CleanError(`That URL is ${ct}, not an image: ${truncate(url, 80)}`);
   const buf = new Uint8Array(await res.arrayBuffer());
   if (buf.byteLength > 20 * 1024 * 1024) throw new CleanError("Input image exceeds the 20MB limit.");
+  if (budget) chargeBudget(budget, buf.byteLength, "input images");
   return { mimeType: ct, data: bytesToBase64(buf) };
 }
 
-const isYouTube = (u: string) => /(?:youtube\.com|youtu\.be)/i.test(u);
+const isYouTube = (u: string) => {
+  try {
+    const h = new URL(u).hostname.toLowerCase();
+    return h === "youtu.be" || h === "youtube.com" || h.endsWith(".youtube.com");
+  } catch {
+    return false;
+  }
+};
 
 /** Build a Gemini content part for a digest input URL. */
-async function loadFilePart(url: string): Promise<any> {
+async function loadFilePart(url: string, budget: { left: number }): Promise<any> {
   const u = url.trim();
   if (isYouTube(u)) return { fileData: { fileUri: u } };
-  const parsed = assertPublicHttpUrl(u);
-  const res = await fetch(parsed);
+  const res = await safeFetch(u);
   if (!res.ok) throw new CleanError(`Couldn't fetch ${truncate(u, 120)} (HTTP ${res.status}).`);
-  const ct = (res.headers.get("content-type") ?? "").split(";")[0].trim() || "application/octet-stream";
+  const ct = (res.headers.get("content-type") ?? "").split(";")[0].trim().slice(0, 128) || "application/octet-stream";
   const buf = new Uint8Array(await res.arrayBuffer());
   if (buf.byteLength > 25 * 1024 * 1024) {
     throw new CleanError(
-      `${truncate(u, 80)} is ${(buf.byteLength / 1048576).toFixed(1)}MB — over the 25MB inline limit (Worker memory). Split it or paste extracted text into 'content'.`,
+      `${truncate(u, 80)} is ${(buf.byteLength / 1048576).toFixed(1)}MB — over the 25MB per-file inline limit (Worker memory). Split it or paste extracted text into 'content'.`,
     );
   }
+  chargeBudget(budget, buf.byteLength, "digest inputs");
   return { inlineData: { mimeType: ct, data: bytesToBase64(buf) } };
 }
 
@@ -646,6 +703,16 @@ async function generateImage(args: Record<string, unknown>, ctx: ToolCtx): Promi
   }
 
   const meta = models.find((m) => m.name.replace(/^models\//, "") === modelId);
+  if (explicit && !meta) {
+    return {
+      content: [
+        textBlock(
+          `"${modelId}" isn't in your current model list, so I can't tell how to call it. Run list_gemini_models for valid ids, or use gemini_raw for a brand-new model.`,
+        ),
+      ],
+      isError: true,
+    };
+  }
   const nameLower = modelId.toLowerCase();
   const isImagen = meta ? modelIsImagen(meta) : nameLower.includes("imagen");
   const canEdit = meta ? modelCanEditImages(meta) : nameLower.includes("image") && !nameLower.includes("imagen");
@@ -667,16 +734,17 @@ async function generateImage(args: Record<string, unknown>, ctx: ToolCtx): Promi
 
   let resp: any;
   if (isImagen && !editing) {
-    const n = Math.min(Math.max(coerceNumber(args.number_of_images) ?? 1, 1), 4);
+    const n = Math.min(Math.max(Math.round(coerceNumber(args.number_of_images) ?? 1), 1), 4);
     const parameters: Record<string, unknown> = { sampleCount: n };
     if (aspect) parameters.aspectRatio = aspect;
     resp = await ctx.gemini.predict(modelId, { instances: [{ prompt }], parameters });
   } else {
     // Nano Banana (Gemini image) via generateContent — supports editing, with a
     // transparent TEXT+IMAGE -> IMAGE-only fallback for model-shape differences.
+    const editBudget = { left: MAX_EDIT_INLINE_BYTES };
     const parts: any[] = [];
     for (const url of inputs) {
-      const img = await loadImageForEdit(ctx, url);
+      const img = await loadImageForEdit(ctx, url, editBudget);
       parts.push({ inlineData: { mimeType: img.mimeType, data: img.data } });
     }
     parts.push({ text: prompt });
@@ -847,7 +915,8 @@ async function geminiDigest(args: Record<string, unknown>, ctx: ToolCtx): Promis
   const parts: any[] = [];
   parts.push({ text: query ? `Task to keep in focus while digesting: ${query}` : "Digest the following input(s)." });
   if (content.trim()) parts.push({ text: content });
-  for (const url of fileUrls) parts.push(await loadFilePart(url));
+  const digestBudget = { left: MAX_DIGEST_INLINE_BYTES };
+  for (const url of fileUrls) parts.push(await loadFilePart(url, digestBudget));
 
   const resp = await ctx.gemini.generateContent(model, {
     systemInstruction: {
