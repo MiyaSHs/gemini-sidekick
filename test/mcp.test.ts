@@ -35,8 +35,8 @@ test("initialize returns serverInfo, capabilities, and the philosophy instructio
   const j: any = await res.json();
   assert.equal(j.result.serverInfo.name, "gemini-mcp");
   assert.ok(j.result.capabilities.tools);
-  assert.match(j.result.instructions, /gap-filler and a verifier/);
-  assert.match(j.result.instructions, /Critique-then-refine/);
+  assert.match(j.result.instructions, /capability extender/);
+  assert.match(j.result.instructions, /generate and edit images/);
 });
 
 test("initialize negotiates protocol version (echo known, else latest)", async () => {
@@ -48,20 +48,21 @@ test("initialize negotiates protocol version (echo known, else latest)", async (
   assert.equal(current.result.protocolVersion, "2025-11-25");
 });
 
-test("tools/list returns all 8 tools; structured tools carry an outputSchema", async () => {
+test("tools/list returns the three capability tools with schemas + annotations", async () => {
   const j: any = await (await post(rpc("tools/list"))).json();
   const names = j.result.tools.map((t: any) => t.name);
-  assert.equal(names.length, 8);
-  for (const n of ["list_gemini_models", "generate_image", "gemini_audit", "ask_gemini", "gemini_disagree", "gemini_digest", "gemini_grounded", "gemini_raw"]) {
+  assert.equal(names.length, 3);
+  for (const n of ["list_gemini_models", "generate_image", "gemini_raw"]) {
     assert.ok(names.includes(n), `missing ${n}`);
+  }
+  // the removed verification/second-opinion tools must be gone
+  for (const n of ["gemini_audit", "ask_gemini", "gemini_disagree", "gemini_digest", "gemini_grounded"]) {
+    assert.ok(!names.includes(n), `${n} should have been removed`);
   }
   for (const t of j.result.tools) assert.ok(t.inputSchema, `${t.name} missing inputSchema`);
   for (const t of j.result.tools) assert.equal(typeof t.annotations?.readOnlyHint, "boolean", `${t.name} missing annotations`);
   assert.equal(j.result.tools.find((t: any) => t.name === "list_gemini_models").annotations.readOnlyHint, true);
   assert.equal(j.result.tools.find((t: any) => t.name === "generate_image").annotations.readOnlyHint, false);
-  const audit = j.result.tools.find((t: any) => t.name === "gemini_audit");
-  assert.ok(audit.outputSchema, "gemini_audit should declare an outputSchema");
-  assert.deepEqual(audit.outputSchema.required, ["verdict", "confidence", "summary", "issues"]);
 });
 
 test("ping returns an empty result", async () => {
@@ -86,54 +87,11 @@ test("unknown tool returns an isError tool result, not a crash", async () => {
 });
 
 test("a tool failure surfaces a clean message, never a stack trace", async () => {
-  const j: any = await (await post(rpc("tools/call", { name: "gemini_audit", arguments: { content: "x" } }))).json();
+  const j: any = await (await post(rpc("tools/call", { name: "generate_image", arguments: { prompt: "x" } }))).json();
   assert.equal(j.result.isError, true);
   const text = j.result.content[0].text;
   assert.match(text, /no key in test/); // the underlying message is surfaced
   assert.doesNotMatch(text, /\n\s+at /); // but no stack frames
-});
-
-test("gemini_audit returns structuredContent (+ text mirror) through the protocol", async () => {
-  const auditObj = { verdict: "sound", confidence: 0.92, summary: "looks fine", issues: [] };
-  // Stub Gemini to return the audit JSON as a generateContent response. An explicit
-  // model id means defaultsFor/listModels is never called.
-  const stub: any = {
-    env: {},
-    origin: "https://example.workers.dev",
-    gemini: {
-      generateContent: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify(auditObj) }] } }] }),
-    },
-  };
-  const j: any = await (
-    await postWith(rpc("tools/call", { name: "gemini_audit", arguments: { content: "2 + 2 = 5", model: "gemini-x-pro" } }), stub)
-  ).json();
-  assert.equal(j.result.isError, undefined);
-  assert.deepEqual(j.result.structuredContent, auditObj);
-  assert.match(j.result.content[0].text, /verdict/); // text mirror for older clients
-});
-
-test("ask_gemini preserves the 'model' role in history (multi-turn continuity)", async () => {
-  let captured: any;
-  const stub: any = {
-    env: {},
-    origin: "https://example.workers.dev",
-    gemini: {
-      generateContent: async (_model: string, body: any) => {
-        captured = body;
-        return { candidates: [{ content: { parts: [{ text: "ok" }] } }] };
-      },
-    },
-  };
-  await postWith(
-    rpc("tools/call", {
-      name: "ask_gemini",
-      arguments: { prompt: "next", model: "gemini-x-flash", history: [{ role: "user", text: "hi" }, { role: "model", text: "hello" }] },
-    }),
-    stub,
-  );
-  assert.equal(captured.contents[0].role, "user");
-  assert.equal(captured.contents[1].role, "model"); // not flipped to "user"
-  assert.equal(captured.contents[2].role, "user");
 });
 
 test("malformed JSON body returns a parse error", async () => {

@@ -1,17 +1,17 @@
 # Gemini Sidekick — a Gemini MCP connector for Claude
 
-A remote [MCP](https://modelcontextprotocol.io) connector that gives Claude access to your
-Google Gemini models, deployed as a single stateless **Cloudflare Worker** on the free tier.
-It works everywhere your Claude account goes: claude.ai web, the mobile app, Claude Desktop,
-and every Claude Code project.
+A remote [MCP](https://modelcontextprotocol.io) connector that gives Claude **capabilities it
+doesn't have on its own** — image generation/editing and other Gemini generative modalities —
+deployed as a single stateless **Cloudflare Worker** on the free tier. It works everywhere your
+Claude account goes: claude.ai web, the mobile app, Claude Desktop, and every Claude Code project.
 
 > **The rule this whole thing is built around:**
-> Gemini is a gap-filler and a verifier, never an author. Claude writes every answer itself —
-> its own reasoning, creativity, brainstorming, and judgment, from start to finish. This
-> connector exists only to (a) do things Claude cannot do at all (generate and edit images,
-> reach exotic models) and (b) make Claude's own answers better through independent
-> verification and contrasting perspectives. Never use it to outsource Claude's thinking,
-> writing, ideation, or analysis. **Critique-then-refine, not merge-two-drafts.**
+> Gemini is a capability extender, never a co-author or reviewer. Claude writes every answer
+> itself — its reasoning, writing, code, analysis, and judgment are Claude's own, and are never
+> outsourced to, supplemented by, or second-guessed against Gemini. This connector exists only to
+> do things Claude cannot do at all: generate and edit images, and reach other generative
+> modalities (video, speech, music, embeddings, and exotic or future models). **Use it for those
+> capabilities and nothing else.**
 
 This rule is sent to Claude on every connection, and it's also in the two paste-blocks below
 ([`claude-profile-instructions.md`](./claude-profile-instructions.md) and
@@ -23,12 +23,11 @@ This rule is sent to Claude on every connection, and it's also in the two paste-
 |------|---------------|
 | `list_gemini_models` | Live model discovery + recommended defaults. Nothing is hardcoded; the live list is the source of truth, so new models on your key appear automatically. |
 | `generate_image` | Generate (Imagen-class quality, or a fast/cheap draft) **and** iteratively edit — feed a result's URL back in to refine "add a red bandana / warmer light / bigger logo" indefinitely, branching whenever you want. |
-| `gemini_audit` | Independent, **structured** cross-model audit of important output Claude produced (issues with severity + location + suggested fix + a confidence) so Claude can surgically fix only what's wrong. |
-| `ask_gemini` | A genuine second opinion to contrast with Claude's own answer. Multi-turn. |
-| `gemini_disagree` | Asks a fast and a strong model the same thing and surfaces only where they **diverge** — divergence is the signal. |
-| `gemini_digest` | Offloads a very large input (big PDF, whole codebase, long transcript, YouTube URL) to Gemini's huge context window and returns a compact structured summary. |
-| `gemini_grounded` | Gemini with Google Search grounding as a second, independent search engine to cross-check facts. |
-| `gemini_raw` | Escape hatch to any model/method on your key (music, robotics, video, TTS, embeddings, future models), including polling long-running video jobs to completion. |
+| `gemini_raw` | Escape hatch to any other generative modality on your key (video/Veo, speech/TTS, music/Lyria, embeddings, future models), including polling long-running video jobs to completion. |
+
+It is deliberately scoped to **capabilities only** — not second opinions, code review,
+fact-checking, web grounding, or summarisation. Claude's own reasoning, writing, and code stay
+authoritative.
 
 Every generated/edited image is hosted at a stable, unguessable URL and returned both as a
 markdown image and as a plain clickable link — because many clients (claude.ai web/mobile)
@@ -137,17 +136,16 @@ from [`claude-code-config.md`](./claude-code-config.md) to your global `~/.claud
 
 ## Verify it works (after deploy)
 
-**Automated smoke test** — speaks MCP straight to your deployed Worker and exercises each tool
+**Automated smoke test** — speaks MCP straight to your deployed Worker and exercises the tools
 against real Gemini, with no Claude in the loop (so it's deterministic and scriptable). It makes
-a few cents of real calls.
+a few cents of real calls (mostly the image generate + edit).
 
 ```bash
 GEMINI_MCP_URL="https://gemini-mcp.<your-subdomain>.workers.dev/<CONNECTOR_SECRET>/mcp" npm run smoke
 ```
 
-- `npm run smoke -- --cheap` — protocol + model list + one flash call only (near-free).
+- `npm run smoke -- --cheap` — protocol + model list + a free `countTokens` call only (no images).
 - `npm run smoke -- --no-image` — skip the (priciest) image generate/edit calls.
-- `npm run smoke -- --full` — also run `gemini_disagree` (3 calls) and `gemini_digest`.
 
 Exit code is `0` only if every step passed. The secret stays in the env var — it's never written
 to the repo.
@@ -252,9 +250,9 @@ output is auto-hosted at a link.** Reasoning:
   return a link" treatment images get. `gemini_raw` already does that automatically for any
   inline media in a response, so TTS audio comes back as a clickable URL with **zero** extra
   surface.
-- A leaner tool list serves the "proactive but never naggy" goal: fewer tools means Claude
-  routes to the right one more reliably, so a low-frequency capability is better left in the
-  escape hatch than promoted to its own tool.
+- A leaner tool list keeps the connector reliable: fewer tools means Claude routes to the
+  right one more readily, so a low-frequency capability is better left in the escape hatch
+  than promoted to its own tool.
 - If you find yourself reaching for it constantly, promoting it to a first-class tool later is
   a small change (it would mostly be the hosting wiring, which already exists).
 

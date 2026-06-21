@@ -1,23 +1,22 @@
 #!/usr/bin/env node
 // Automated smoke test for a DEPLOYED Gemini connector.
 // It speaks MCP (Streamable HTTP / JSON-RPC) straight to your Worker and exercises
-// each tool against the real Gemini API — no Claude in the loop, so it's
+// the tools against the real Gemini API — no Claude in the loop, so it's
 // deterministic and scriptable (exit 0 = all passed, 1 = something failed).
 //
-// It makes REAL, billable Gemini calls (a few cents: a couple of flash text calls
-// plus one image generate + one edit by default). Cheaper/fuller modes below.
+// It makes REAL, billable Gemini calls. By default: one free countTokens call
+// plus one image generate + one edit (a few cents). Cheaper modes below.
 //
 // Usage:
 //   GEMINI_MCP_URL="https://gemini-mcp.<sub>.workers.dev/<SECRET>/mcp" node scripts/smoke.mjs
 //   ... npm run smoke
 //
 // Flags:
-//   --cheap   protocol + model list + one flash text call only (near-free; no images)
-//   --full    everything above PLUS gemini_disagree (3 calls) and gemini_digest
-//   --no-image    skip image generate/edit (avoids the priciest calls)
+//   --cheap     protocol + model list + a free countTokens call only (no images)
+//   --no-image  skip image generate/edit (avoids the priciest calls)
 //
 // Optional env overrides (else the server's recommended defaults are used):
-//   SMOKE_TEXT_MODEL, SMOKE_IMAGE_MODEL, SMOKE_EDIT_MODEL
+//   SMOKE_IMAGE_MODEL, SMOKE_EDIT_MODEL
 
 const URL_ = process.env.GEMINI_MCP_URL;
 if (!URL_ || !/\/mcp$/.test(URL_)) {
@@ -26,7 +25,6 @@ if (!URL_ || !/\/mcp$/.test(URL_)) {
 }
 const args = new Set(process.argv.slice(2));
 const CHEAP = args.has("--cheap");
-const FULL = args.has("--full");
 const NO_IMAGE = args.has("--no-image");
 
 let id = 0;
@@ -81,9 +79,10 @@ async function step(label, fn) {
 }
 
 const defaults = {};
+let textModelId;
 const run = async () => {
   console.log(`Smoke testing ${URL_.replace(/\/[^/]+\/mcp$/, "/<secret>/mcp")}`);
-  console.log(CHEAP ? "Mode: --cheap (near-free)" : FULL ? "Mode: --full" : "Mode: standard (a few cents of real calls)");
+  console.log(CHEAP ? "Mode: --cheap (near-free)" : "Mode: standard (a few cents of real calls)");
 
   await step("initialize", async () => {
     const r = await rpc("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "smoke", version: "1" } });
@@ -92,9 +91,9 @@ const run = async () => {
   });
   await rpc("notifications/initialized").catch(() => {});
 
-  await step("tools/list = 8 tools", async () => {
+  await step("tools/list = 3 tools", async () => {
     const r = await rpc("tools/list");
-    if (r.tools.length !== 8) throw new Error(`got ${r.tools.length}`);
+    if (r.tools.length !== 3) throw new Error(`got ${r.tools.length}`);
     return r.tools.map((t) => t.name).join(", ");
   });
 
@@ -102,29 +101,25 @@ const run = async () => {
     const r = await tool("list_gemini_models", {});
     const parsed = JSON.parse(r.text);
     Object.assign(defaults, parsed.recommended_defaults || {});
-    return `${parsed.count} models; reasoning=${defaults.reasoning}, fast=${defaults.fast}, img=${defaults.image_generate}`;
+    const m = (parsed.models || []).find((x) => x.methods?.includes("countTokens")) ||
+      (parsed.models || []).find((x) => x.methods?.includes("generateContent"));
+    textModelId = m && m.id;
+    return `${parsed.count} models; img=${defaults.image_generate}, edit=${defaults.image_edit}, video=${defaults.video}`;
   });
 
-  const textModel = process.env.SMOKE_TEXT_MODEL || defaults.fast;
-  await step("ask_gemini (fast)", async () => {
-    const r = await tool("ask_gemini", { prompt: "Reply with exactly one word: pong", model: textModel });
-    if (!r.text.trim()) throw new Error("empty answer");
-    return `“${r.text.split("\n")[0].slice(0, 40)}”`;
+  // gemini_raw is the escape hatch; countTokens is free and exercises the passthrough.
+  await step("gemini_raw (countTokens, free)", async () => {
+    if (!textModelId) return "skipped — no text-capable model on key";
+    const r = await tool("gemini_raw", {
+      model: textModelId,
+      method: "countTokens",
+      body: { contents: [{ parts: [{ text: "hello world from the smoke test" }] }] },
+    });
+    if (!/totalTokens/i.test(r.text)) throw new Error("no totalTokens in response");
+    return r.text.replace(/\s+/g, " ").slice(0, 60);
   });
 
   if (CHEAP) return;
-
-  await step("gemini_audit (structured)", async () => {
-    const r = await tool("gemini_audit", { content: "function add(a, b) { return a - b; }", focus: "logical errors", model: textModel });
-    if (!r.structured || !r.structured.verdict) throw new Error("no structuredContent.verdict");
-    return `verdict=${r.structured.verdict}, issues=${(r.structured.issues || []).length}`;
-  });
-
-  await step("gemini_grounded", async () => {
-    const r = await tool("gemini_grounded", { query: "Name one fact about the Eiffel Tower's height. Be brief.", model: textModel });
-    if (!r.text.trim()) throw new Error("empty answer");
-    return r.text.includes("Sources") ? "answer + sources" : "answer (no sources attached)";
-  });
 
   if (!NO_IMAGE) {
     let genUrl;
@@ -151,18 +146,6 @@ const run = async () => {
         return await verifyImage(editUrl);
       });
     }
-  }
-
-  if (FULL) {
-    await step("gemini_digest", async () => {
-      const r = await tool("gemini_digest", { content: "The quick brown fox jumps over the lazy dog. ".repeat(50), query: "What animal jumps?", model: textModel });
-      if (!r.structured?.summary) throw new Error("no structuredContent.summary");
-      return "structured digest ok";
-    });
-    await step("gemini_disagree (3 calls)", async () => {
-      const r = await tool("gemini_disagree", { prompt: "Is tabs or spaces better for indentation?", fast_model: textModel, strong_model: defaults.reasoning });
-      return r.structured ? `overall=${r.structured.overall}` : "ran (no structured analysis)";
-    });
   }
 };
 
